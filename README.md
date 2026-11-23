@@ -9,7 +9,9 @@ A small web app for saving short texts as "speech bubbles" and having them read 
 - **Voice presets**: named voice + speed + pitch, assignable per text
 - **Thai & English**: each text is read by a voice in its own language (detected automatically)
 - **Dashboard**: most-played texts, plays per day, totals (7 days / 30 days / all time)
-- **Private per visitor**: every visitor is signed in anonymously and only sees their own data
+- **Guests and accounts**: visitors start as private guests (anonymous); **Sign up** keeps their texts and lets them share with other registered users
+- **Mine / Everyone**: registered users can browse each other's texts read-only, play and copy them
+- **Dashboard Mine / Overall**: your texts' stats, or the best texts across all registered users
 - **Themes**: Auto (follows the browser/OS), Light, Dark
 
 Text-to-speech uses the browser's built-in [Web Speech API](https://developer.mozilla.org/docs/Web/API/Web_Speech_API): no API key, no cost, using the voices installed on the visitor's device.
@@ -25,9 +27,19 @@ Browser (GitHub Pages) ──supabase-js + anon key──▶ Supabase
                                                     └─ Row Level Security: user_id = auth.uid()
 ```
 
-- The **anon key is public by design**. Security comes from Row Level Security (RLS) in [`supabase/schema.sql`](supabase/schema.sql): every row has a `user_id`, and visitors can only read and write rows where `user_id = auth.uid()`.
-- Not signed in (`anon` role) = no access to any table.
-- The dashboard numbers come from a Postgres function (`get_stats`) that also runs under RLS.
+The **anon key is public by design**. Security comes from Row Level Security (RLS) in [`supabase/schema.sql`](supabase/schema.sql):
+
+| | Guest (anonymous) | Registered user |
+|---|---|---|
+| Own texts & presets | read, add, edit, delete | read, add, edit, delete |
+| Other registered users' texts | ✗ | **read**, play, copy (no edit/delete) |
+| Guests' texts (not your own) | ✗ | ✗ (guests stay private) |
+| Others' presets | ✗ | ✗ |
+| Dashboard | Mine | Mine + Overall |
+
+- Every row has a `user_id`; writes are only allowed where `user_id = auth.uid()`.
+- Plays of a shared text count towards that text ("which text is actually the best").
+- Not signed in at all (`anon` role) = no access to any table.
 
 ---
 
@@ -47,8 +59,10 @@ Browser (GitHub Pages) ──supabase-js + anon key──▶ Supabase
 ### 1. Supabase project (once)
 
 1. Create a project at [supabase.com](https://supabase.com/).
-2. **Authentication → Sign In / Providers → enable "Allow anonymous sign-ins".**
-3. **SQL Editor → New query →** paste all of [`supabase/schema.sql`](supabase/schema.sql) → **Run**. It's safe to run again later.
+2. **Authentication → Sign In / Providers**:
+   - enable **"Allow anonymous sign-ins"**;
+   - under **Email**, turn **"Confirm email" off** (recommended for this demo: sign-up then works instantly. If it's on, users must click an email link before they can set a password).
+3. **SQL Editor → New query →** paste all of [`supabase/schema.sql`](supabase/schema.sql) → **Run**. It's safe to run again, and it upgrades a project created from an older version in place (data is kept).
 4. **Project Settings → API**: copy the **Project URL** and the **anon public** key.
    Never use the `service_role` key in this app.
 
@@ -111,13 +125,22 @@ Default voices and the theme are saved per browser (localStorage). Texts, preset
 - Voices in other languages are hidden.
 
 ### Dashboard
-Total plays, characters spoken, saved texts, the most-played text, a top-10 chart, plays per day, and a table view. **Reset stats** deletes your play history (texts are kept).
+Total plays, characters spoken, texts, the most-played text, a top-10 chart, plays per day, and a table view.
+- **Mine**: your texts, played by anyone.
+- **Overall** (registered users): the best texts across all registered users, with authors.
+- **Reset stats** deletes the play history of *your* texts (texts are kept).
 
 ### Status pill
 Shows the Supabase connection: **Saved to database**, **Saving…**, **Last save failed**, or **Database offline**. Click it to re-check.
 
-### "Your data" means this browser
-Each browser gets its own anonymous Supabase user, stored in that browser. Clearing site data, or opening the site in another browser or device, starts a new, empty space.
+### Guests, Sign up and Sign in
+- Everyone starts as a **Guest**: a private, anonymous space in this browser. Clearing site data or switching browser starts a new, empty guest space.
+- **Sign up** (display name, email, password) turns the guest into a registered user. **Your texts, presets and stats are kept** (same user).
+- **Sign in** opens an existing account (e.g. on another device). Texts from the current guest space are *not* moved into it: you'll see a warning.
+- **Sign out** returns to a fresh guest space.
+
+### Mine / Everyone (registered users)
+Above the list, **Everyone** shows texts from all registered users. Others' bubbles show **"by Name"** and can be played (counted for that text) and copied, but not edited or deleted. **Mine** shows only your own.
 
 ---
 
@@ -184,6 +207,7 @@ No front-end framework, no server, no paid services.
 │   ├── dashboard.ts         Dashboard tab (Supabase get_stats)
 │   ├── store.ts             In-memory state + ordered saves
 │   ├── backend.ts           All Supabase calls (auth, tables, functions)
+│   ├── account.ts           Sign up / Sign in / Sign out, Mine | Everyone
 │   ├── tts.ts               Speech: Thai/English detection, voice choice, speaking
 │   ├── theme.ts             Auto / Light / Dark
 │   └── style.css
@@ -197,15 +221,16 @@ No front-end framework, no server, no paid services.
 
 | Object | What it is |
 |---|---|
+| `profiles` | id (= user), display_name. Created automatically when a user signs up |
 | `presets` | id, user_id, name, voice_uri, rate, pitch, created_at |
 | `texts` | id, user_id, text, preset_id, created_at, updated_at |
-| `plays` | one row per time a text is read aloud: user_id, text_id, played_at, chars, voice_uri, preset_id |
-| `text_list` (view) | texts with their play counts |
-| `get_stats(p_days, p_tz)` | dashboard numbers for the caller |
-| `clear_plays()` | deletes the caller's play history |
+| `plays` | one row per time a text is read aloud: user_id (who played), text_id, played_at, chars, voice_uri, preset_id |
+| `list_texts(p_scope)` | texts for the list: `mine` or `everyone`, with play counts, author, is_mine |
+| `get_stats(p_days, p_tz, p_scope)` | dashboard numbers: `mine` or `overall` |
+| `clear_plays()` | deletes the play history of the caller's texts |
 | `ping()` | connection check for the status pill |
 
-Composite foreign keys make sure a text can only use its owner's presets, and plays can only reference the player's own texts.
+Composite foreign keys make sure a text can only use its owner's presets. A play can only be recorded for a text the player is allowed to see.
 
 ---
 
@@ -215,6 +240,8 @@ Composite foreign keys make sure a text can only use its owner's presets, and pl
 |---|---|
 | "Supabase isn't configured" | Set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` in `.env` (locally) or in the GitHub secrets (Pages), then restart or redeploy |
 | "Anonymous sign-ins are disabled" | Supabase → Authentication → enable anonymous sign-ins |
+| `function public.list_texts does not exist` | Run the latest `supabase/schema.sql` in the SQL editor |
+| Sign up says "check your email" | "Confirm email" is on in Supabase; turn it off for the demo, or confirm via the email link |
 | `relation "public.text_list" does not exist` | Run `supabase/schema.sql` in the Supabase SQL editor |
 | Pill says **Database offline** | Check your internet connection. Free Supabase projects pause after inactivity; resume yours in the Supabase dashboard |
 | Pages site loads but shows a blank page | Check that Pages → Source is "GitHub Actions", and that the workflow succeeded |

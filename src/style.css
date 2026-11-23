@@ -343,3 +343,32 @@ button.link:hover { text-decoration: underline; }
 button[data-act="copy"] { display: inline-flex; align-items: center; justify-content: center; color: var(--text-2); }
 button[data-act="copy"][data-state="copied"] { color: #1a9a5c; }
 button[data-act="copy"][data-state="failed"] { color: var(--danger); }
+
+/* ---------- accounts ---------- */
+.account { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.account-name { font-weight: 600; max-width: 14ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.account .guest { font-size: 13px; }
+.auth-panel {
+  background: var(--surface); border: 1px solid var(--accent); border-radius: var(--radius);
+  padding: 16px; margin: -8px 0 20px;
+}
+.auth-form { display: flex; flex-direction: column; gap: 10px; max-width: 420px; }
+.auth-form h2 { font-size: 18px; margin: 0; }
+.auth-form label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--text-2); }
+.auth-form input {
+  font: inherit; color: var(--text); background: var(--bg);
+  border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px;
+}
+.auth-form input:focus { border-color: var(--accent); outline: none; }
+.auth-error { margin: 0; min-height: 1.2em; font-size: 13px; color: var(--danger); }
+.auth-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.auth-actions button[disabled] { opacity: .6; }
+
+/* Mine | Everyone */
+.collection-head { gap: 10px; flex-wrap: wrap; }
+.scope-switch button { font-size: 13px; }
+
+/* someone else's bubble: read-only, with author */
+.bubble.others .speech { --tint: color-mix(in srgb, var(--text) 7%, var(--surface)); }
+.bubble.others .speech::after { left: auto; right: 22px; }
+.author { font-size: 12px; color: var(--text-2); font-style: italic; }

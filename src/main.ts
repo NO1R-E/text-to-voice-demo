@@ -22,6 +22,7 @@ import {
 import { renderDashboard } from "./dashboard";
 import { esc } from "./util";
 import { applyTheme, loadTheme, saveTheme, type Theme } from "./theme";
+import { setupAccount } from "./account";
 
 // ---------- default voice settings (per browser) ----------
 /** What `say()` needs: a voice plus speed/pitch (a Preset also fits this shape). */
@@ -149,8 +150,28 @@ app.innerHTML = `
         <button type="button" data-theme-choice="light" title="Light theme">☀ Light</button>
         <button type="button" data-theme-choice="dark" title="Dark theme">☾ Dark</button>
       </div>
+      <div id="account" class="account" aria-live="polite"></div>
     </div>
   </header>
+
+  <section id="auth-panel" class="auth-panel" hidden aria-labelledby="auth-title">
+    <form id="auth-form" class="auth-form" novalidate>
+      <h2 id="auth-title">Sign up</h2>
+      <p id="auth-hint" class="hint"></p>
+      <p id="auth-warning" class="notice" hidden></p>
+      <label id="auth-name-row">Display name
+        <input id="auth-name" maxlength="40" autocomplete="nickname" placeholder="Shown on texts you share"></label>
+      <label>Email <input id="auth-email" type="email" autocomplete="email"></label>
+      <label>Password <input id="auth-password" type="password" autocomplete="new-password" placeholder="At least 6 characters"></label>
+      <p id="auth-error" class="auth-error" role="alert"></p>
+      <div class="auth-actions">
+        <button type="button" id="auth-switch" class="link"></button>
+        <span class="spacer"></span>
+        <button type="button" id="auth-cancel" class="ghost">Cancel</button>
+        <button type="submit" id="auth-submit" class="primary">Sign up</button>
+      </div>
+    </form>
+  </section>
 
   <main>
     <section id="tab-texts" class="panel">
@@ -202,6 +223,10 @@ app.innerHTML = `
 
       <div class="collection-head">
         <h2>All texts <span id="count" class="count-badge"></span></h2>
+        <div id="scope" class="filters scope-switch" role="group" aria-label="Show texts" hidden>
+          <button type="button" data-scope="mine" aria-pressed="true">Mine</button>
+          <button type="button" data-scope="everyone" aria-pressed="false" title="Texts from all registered users">Everyone</button>
+        </div>
       </div>
       <div class="toolbar">
         <label class="search">
@@ -679,6 +704,7 @@ function renderList(): void {
         ? `<textarea class="edit" data-edit="${t.id}" rows="3" maxlength="${MAX_CHARS}">${esc(t.text)}</textarea>`
         : `<p class="text ${long && !open ? "clamped" : ""}">${esc(t.text)}</p>`;
       const lang = languageOf(t.text);
+      if (!t.isMine) return othersBubble(t, { playing, long, open, body, lang });
       return `
         <li class="bubble ${playing ? "playing" : ""}" data-id="${t.id}">
           <div class="speech-wrap">
@@ -715,6 +741,32 @@ function renderList(): void {
   }
 }
 
+/** Another registered user's text: read-only (play + copy), with its author. */
+function othersBubble(
+  t: { id: string; plays: number; author?: string },
+  v: { playing: boolean; long: boolean; open: boolean; body: string; lang: Lang },
+): string {
+  return `
+        <li class="bubble others ${v.playing ? "playing" : ""}" data-id="${t.id}">
+          <div class="speech-wrap">
+            <div class="speech ${v.long ? "long" : ""}">${v.body}</div>
+            ${v.long ? `<button type="button" class="link sm" data-act="more" aria-expanded="${v.open}">${v.open ? "Show less" : "Show more"}</button>` : ""}
+          </div>
+          <div class="bubble-foot">
+            <div class="bubble-tools">
+              ${v.lang === "th" ? `<span class="lang-tag" title="Thai text: read with a Thai voice">ไทย</span>` : ""}
+              <span class="author">by ${esc(t.author ?? "someone")}</span>
+            </div>
+            <div class="actions">
+              <span class="meta">${t.plays} play${t.plays === 1 ? "" : "s"}</span>
+              <button data-act="speak" class="${v.playing ? "primary" : "ghost"} sm" ${ttsSupported ? "" : "disabled"}
+                aria-label="${v.playing ? "Stop" : "Read aloud"}">${v.playing ? "■ Stop" : "▶ Speak"}</button>
+              <button data-act="copy" class="ghost sm icon" aria-label="Copy text" title="Copy text">${COPY_ICON}</button>
+            </div>
+          </div>
+        </li>`;
+}
+
 function saveEdit(id: string): void {
   const ta = list.querySelector<HTMLTextAreaElement>(`[data-edit="${id}"]`);
   const text = ta?.value.trim();
@@ -748,9 +800,11 @@ list.addEventListener("click", (e) => {
   if (!el || !id) return;
   const item = store.texts.find((t) => t.id === id);
   if (!item) return;
+  // Others' texts are read-only: only play, copy and show more.
+  if (!item.isMine && !["speak", "copy", "more"].includes(el.dataset.act ?? "")) return;
   switch (el.dataset.act) {
     case "speak":
-      say(item.text, settingsFor(item.text, item.presetId), id, id);
+      say(item.text, settingsFor(item.text, item.isMine ? item.presetId : undefined), id, id);
       break;
     case "edit":
       editingId = id;
@@ -870,7 +924,8 @@ document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible") void checkHealth();
 });
 
-// Load texts + presets from Postgres before the first full render.
+// Sign in (anonymously, once per browser) and load texts + presets before the first full render.
+setupAccount();
 renderFilterOptions();
 void checkHealth();
 await store.init();

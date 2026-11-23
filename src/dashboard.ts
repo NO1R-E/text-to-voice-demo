@@ -1,10 +1,12 @@
-import { getStats, type Stats } from "./backend";
+import { getStats, type Stats, type StatsScope } from "./backend";
 import { store } from "./store";
 import { esc } from "./util";
 
 const RANGES = { 7: "7 days", 30: "30 days", 0: "All time" } as const;
 type Range = keyof typeof RANGES;
 let range: Range = 30;
+/** "mine" = your texts (played by anyone); "overall" = all registered users' texts. */
+let dashScope: StatsScope = "mine";
 let renderToken = 0;
 
 const tz = (() => {
@@ -37,7 +39,8 @@ export async function renderDashboard(root: HTMLElement): Promise<void> {
   let s: Stats;
   try {
     await store.whenIdle();
-    s = await getStats(range, tz);
+    if (!store.registered) dashScope = "mine"; // overall is for registered users
+    s = await getStats(range, tz, dashScope);
   } catch (e) {
     if (token === renderToken) {
       root.innerHTML = `<p class="notice" role="alert">Couldn't load dashboard data from the database: ${esc(
@@ -52,10 +55,20 @@ export async function renderDashboard(root: HTMLElement): Promise<void> {
   const maxPlays = top[0]?.plays ?? 0;
   const maxDaily = Math.max(1, ...s.daily.map((d) => d.plays));
   const most = s.top[0];
+  const overall = dashScope === "overall";
+  const by = (author?: string | null) => (overall && author ? ` · by ${esc(author)}` : "");
 
   root.innerHTML = `
     <div class="dash-head">
       <h2>Usage</h2>
+      ${
+        store.registered
+          ? `<div class="filters" role="group" aria-label="Whose texts">
+               <button data-dash-scope="mine" aria-pressed="${String(!overall)}" title="Your texts, played by anyone">Mine</button>
+               <button data-dash-scope="overall" aria-pressed="${String(overall)}" title="All registered users' texts">Overall</button>
+             </div>`
+          : ""
+      }
       <div class="filters" role="group" aria-label="Time range">
         ${(Object.keys(RANGES) as unknown as Range[])
           .map((k) => `<button data-range="${k}" aria-pressed="${String(Number(k) === range)}">${RANGES[k]}</button>`)
@@ -66,22 +79,22 @@ export async function renderDashboard(root: HTMLElement): Promise<void> {
     <div class="tiles">
       <div class="tile"><span class="label">Times read aloud</span><span class="value" data-stat="plays">${s.totals.plays}</span></div>
       <div class="tile"><span class="label">Characters spoken</span><span class="value" data-stat="chars">${s.totals.chars.toLocaleString()}</span></div>
-      <div class="tile"><span class="label">Saved texts</span><span class="value" data-stat="texts">${s.totals.texts}</span></div>
+      <div class="tile"><span class="label">${overall ? "Shared texts" : "Saved texts"}</span><span class="value" data-stat="texts">${s.totals.texts}</span></div>
       <div class="tile wide"><span class="label">Most played</span>
         <span class="value text">${most ? esc(truncate(most.text, 60)) : "—"}</span>
-        ${most ? `<span class="muted">${plural(most.plays, "play")}</span>` : ""}
+        ${most ? `<span class="muted">${plural(most.plays, "play")}${by(most.author)}</span>` : ""}
       </div>
     </div>
 
     <div class="card">
-      <h3>Most played texts</h3>
-      <p class="sub">Times each text was read aloud · top ${Math.min(10, s.top.length) || 10}</p>
+      <h3>${overall ? "Best texts overall" : "Most played texts"}</h3>
+      <p class="sub">${overall ? "All registered users' texts, played by anyone" : "Your texts, played by anyone"} · top ${Math.min(10, s.top.length) || 10}</p>
       ${
         top.length
           ? `<div class="hbars">${top
               .map(
                 (r, i) => `
-              <div class="hbar-row" data-tip="<b>${esc(esc(truncate(r.text, 80)))}</b><br>${plural(r.plays, "play")} · last ${fmtDate(r.lastPlayed)}">
+              <div class="hbar-row" data-tip="<b>${esc(esc(truncate(r.text, 80)))}</b><br>${plural(r.plays, "play")}${by(r.author)} · last ${fmtDate(r.lastPlayed)}">
                 <span class="hbar-label">${esc(truncate(r.text, 36))}</span>
                 <span class="hbar-track">
                   <span class="hbar" style="width:${(r.plays / maxPlays) * 100}%"></span>
@@ -116,17 +129,17 @@ export async function renderDashboard(root: HTMLElement): Promise<void> {
       <summary>Table view</summary>
       <div class="table-wrap">
         <table>
-          <thead><tr><th>Text</th><th class="num">Plays</th><th class="num">Chars spoken</th><th>Last played</th></tr></thead>
+          <thead><tr><th>Text</th>${overall ? "<th>Author</th>" : ""}<th class="num">Plays</th><th class="num">Chars spoken</th><th>Last played</th></tr></thead>
           <tbody>
             ${
               s.top.length
                 ? s.top
                     .map(
-                      (r) => `<tr><td>${esc(truncate(r.text, 80))}</td><td class="num">${r.plays}</td>
+                      (r) => `<tr><td>${esc(truncate(r.text, 80))}</td>${overall ? `<td>${esc(r.author ?? "")}</td>` : ""}<td class="num">${r.plays}</td>
                         <td class="num">${r.chars.toLocaleString()}</td><td>${new Date(r.lastPlayed).toLocaleString()}</td></tr>`,
                     )
                     .join("")
-                : `<tr><td colspan="4" class="muted">No data</td></tr>`
+                : `<tr><td colspan="${overall ? 5 : 4}" class="muted">No data</td></tr>`
             }
           </tbody>
         </table>
@@ -138,6 +151,12 @@ export async function renderDashboard(root: HTMLElement): Promise<void> {
       <button id="confirm-no" class="ghost">Cancel</button></span></div>
   `;
 
+  root.querySelectorAll<HTMLButtonElement>("[data-dash-scope]").forEach((b) =>
+    b.addEventListener("click", () => {
+      dashScope = b.dataset.dashScope as StatsScope;
+      void renderDashboard(root);
+    }),
+  );
   root.querySelectorAll<HTMLButtonElement>("[data-range]").forEach((b) =>
     b.addEventListener("click", () => {
       range = Number(b.dataset.range) as Range;

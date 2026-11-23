@@ -1,7 +1,19 @@
 import * as db from "./backend";
-import type { Preset, TextItem } from "./backend";
+import type { Account, Preset, Scope, TextItem } from "./backend";
 
-export type { Preset, TextItem } from "./backend";
+export type { Account, Preset, Scope, StatsScope, TextItem } from "./backend";
+
+const SCOPE_KEY = "task-voice:scope";
+function savedScope(): Scope {
+  try {
+    return localStorage.getItem(SCOPE_KEY) === "everyone" ? "everyone" : "mine";
+  } catch {
+    return "mine";
+  }
+}
+let account: Account | null = null;
+/** Which texts the list shows; "everyone" only applies to registered users. */
+let scope: Scope = savedScope();
 
 /**
  * Data lives in Supabase. The store keeps an in-memory copy so the UI updates
@@ -42,6 +54,25 @@ function send(op: () => Promise<unknown>): void {
   });
 }
 
+/** Re-read the account, texts (for the current scope) and presets. */
+async function reload(): Promise<void> {
+  account = await db.getAccount();
+  const s = await db.loadState(store.scope);
+  state.texts = s.texts;
+  state.presets = s.presets;
+}
+
+/** Run a reload, reporting (not throwing) connection problems. */
+async function guarded(fn: () => Promise<void>): Promise<void> {
+  try {
+    await fn();
+    if (lastError?.startsWith("Can't reach")) lastError = null;
+  } catch (e) {
+    lastError = `Can't reach the database (Supabase): ${message(e)}`;
+  }
+  notify();
+}
+
 function sendPreset(id: string): void {
   const p = state.presets.find((x) => x.id === id);
   if (p) send(() => db.updatePreset({ ...p }));
@@ -74,14 +105,51 @@ export const store = {
   async init(): Promise<void> {
     try {
       await db.ensureSession();
-      const s = await db.loadState();
-      state.texts = s.texts;
-      state.presets = s.presets;
+      await reload();
       lastError = null;
     } catch (e) {
       lastError = `Can't reach the database (Supabase): ${message(e)}`;
     }
     notify();
+  },
+
+  // ---- account ----
+  get account(): Account | null {
+    return account;
+  },
+  get registered(): boolean {
+    return !!account && !account.anonymous;
+  },
+  /** The list's current view ("everyone" only for registered users). */
+  get scope(): Scope {
+    return store.registered ? scope : "mine";
+  },
+  async setScope(next: Scope): Promise<void> {
+    scope = next;
+    try {
+      localStorage.setItem(SCOPE_KEY, next);
+    } catch {
+      /* ignore */
+    }
+    await store.whenIdle();
+    await guarded(reload);
+  },
+  /** Upgrade this anonymous visitor to a registered user (keeps their texts). */
+  async signUp(displayName: string, email: string, password: string): Promise<"done" | "confirm"> {
+    await store.whenIdle();
+    const result = await db.signUp(displayName, email, password);
+    await guarded(reload);
+    return result;
+  },
+  async signIn(email: string, password: string): Promise<void> {
+    await store.whenIdle();
+    await db.signIn(email, password);
+    await guarded(reload);
+  },
+  async signOut(): Promise<void> {
+    await store.whenIdle();
+    await db.signOut();
+    await guarded(reload);
   },
 
   /** Resolves once every pending change has been saved. */
@@ -100,7 +168,15 @@ export const store = {
 
   // ---- texts ----
   addText(text: string, presetId?: string): void {
-    const t: TextItem = { id: crypto.randomUUID(), text, createdAt: Date.now(), presetId, plays: 0 };
+    const t: TextItem = {
+      id: crypto.randomUUID(),
+      text,
+      createdAt: Date.now(),
+      presetId,
+      plays: 0,
+      isMine: true,
+      author: account?.displayName,
+    };
     state.texts.unshift(t);
     notify();
     send(() => db.insertText(t));
@@ -172,7 +248,7 @@ export const store = {
     return state.texts.find((t) => t.id === id)?.plays ?? 0;
   },
   clearStats(): void {
-    for (const t of state.texts) t.plays = 0;
+    for (const t of state.texts) if (t.isMine) t.plays = 0; // resets plays of *your* texts
     notify();
     send(() => db.clearPlays());
   },

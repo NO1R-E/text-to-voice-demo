@@ -161,6 +161,58 @@ export function createClient(_url: string, _key: string, _opts?: unknown) {
         }
         return { data: { session: userId ? { user: { id: userId } } : null }, error: null };
       },
+      async getUser() {
+        if (state().offline) return { data: { user: null }, error: { message: "TypeError: Failed to fetch" } };
+        if (!userId) return { data: { user: null }, error: { message: "Auth session missing!" } };
+        const { rows } = await state().pool.query("select id, email, is_anonymous from auth.users where id = $1", [userId]);
+        return rows[0]
+          ? { data: { user: rows[0] }, error: null }
+          : { data: { user: null }, error: { message: "User not found" } };
+      },
+      /** Like Supabase with "Confirm email" off: linking an email makes the user permanent at once. */
+      async updateUser(attrs: { email?: string; password?: string; data?: Record<string, unknown> }) {
+        if (state().offline) return { data: { user: null }, error: { message: "TypeError: Failed to fetch" } };
+        if (!userId) return { data: { user: null }, error: { message: "Auth session missing!" } };
+        if (attrs.password !== undefined && attrs.password.length < 6) {
+          return { data: { user: null }, error: { message: "Password should be at least 6 characters." } };
+        }
+        try {
+          const { rows } = await state().pool.query(
+            `update auth.users set
+               email = coalesce($2, email),
+               encrypted_password = coalesce($3, encrypted_password),
+               raw_user_meta_data = raw_user_meta_data || $4::jsonb,
+               is_anonymous = (coalesce($2, email) is null)
+             where id = $1 returning id, email, is_anonymous`,
+            [userId, attrs.email ?? null, attrs.password ?? null, JSON.stringify(attrs.data ?? {})],
+          );
+          return { data: { user: rows[0] }, error: null };
+        } catch (e) {
+          const err = e as { code?: string; message: string };
+          return {
+            data: { user: null },
+            error: {
+              message: err.code === "23505" ? "A user with this email address has already been registered" : err.message,
+            },
+          };
+        }
+      },
+      async signInWithPassword({ email, password }: { email: string; password: string }) {
+        if (state().offline) return { data: { user: null, session: null }, error: { message: "TypeError: Failed to fetch" } };
+        const { rows } = await state().pool.query(
+          "select id from auth.users where email = $1 and encrypted_password = $2 and not is_anonymous",
+          [email, password],
+        );
+        if (!rows[0]) return { data: { user: null, session: null }, error: { message: "Invalid login credentials" } };
+        userId = rows[0].id as string;
+        store?.setItem(SESSION_KEY, userId);
+        return { data: { user: { id: userId }, session: { user: { id: userId } } }, error: null };
+      },
+      async signOut() {
+        userId = null;
+        store?.removeItem(SESSION_KEY);
+        return { error: null };
+      },
       async signInAnonymously() {
         if (state().offline) return { data: { user: null, session: null }, error: { message: "TypeError: Failed to fetch" } };
         const id = randomUUID();
@@ -178,8 +230,10 @@ export function createClient(_url: string, _key: string, _opts?: unknown) {
       try {
         const names = Object.keys(args);
         const call = `public.${ident(fn)}(${names.map((n, i) => `${ident(n)} => $${i + 1}`).join(", ")})`;
-        const res = await runAs(userId, `select ${call} as r`, names.map((n) => args[n]));
-        return { data: res.rows[0]?.r ?? null, error: null };
+        const res = await runAs(userId, `select * from ${call} as r`, names.map((n) => args[n]));
+        // Scalar functions come back as a single column named r; table functions as rows (like PostgREST).
+        const scalar = res.fields.length === 1 && res.fields[0].name === "r";
+        return { data: scalar ? (res.rows[0]?.r ?? null) : res.rows, error: null };
       } catch (e) {
         const err = e as { message: string; code?: string };
         return { data: null, error: { message: err.message, code: err.code } };

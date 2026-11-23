@@ -11,9 +11,24 @@ export interface TextItem {
   createdAt: number;
   /** Voice preset used to read this text; undefined = Auto voice. */
   presetId?: string;
-  /** Times read aloud (all time). */
+  /** Times read aloud (all time, by anyone). */
   plays: number;
+  /** False for another registered user's text (read-only). */
+  isMine: boolean;
+  /** Display name of the author (registered users only). */
+  author?: string;
 }
+
+/** Who is using this browser. Everyone has a Supabase user; visitors are anonymous. */
+export interface Account {
+  userId: string;
+  anonymous: boolean;
+  email?: string;
+  displayName?: string;
+}
+
+export type Scope = "mine" | "everyone";
+export type StatsScope = "mine" | "overall";
 
 /** A saved, named set of voice settings that texts can be assigned to. */
 export interface Preset {
@@ -27,7 +42,7 @@ export interface Preset {
 export interface Stats {
   range: { days: number; start: string; end: string; tz: string };
   totals: { plays: number; chars: number; texts: number };
-  top: { id: string; text: string; plays: number; chars: number; lastPlayed: number }[];
+  top: { id: string; text: string; author?: string | null; plays: number; chars: number; lastPlayed: number }[];
   daily: { day: string; plays: number }[];
 }
 
@@ -60,22 +75,73 @@ export async function ensureSession(): Promise<void> {
   if (res.error) throw new Error(res.error.message);
 }
 
+// ---------- accounts ----------
+/** The current user and, if registered, their display name. */
+export async function getAccount(): Promise<Account> {
+  const { data, error } = await sb().auth.getUser();
+  if (error || !data.user) throw new Error(error?.message ?? "Not signed in");
+  const u = data.user as { id: string; email?: string | null; is_anonymous?: boolean };
+  const account: Account = { userId: u.id, anonymous: u.is_anonymous !== false, email: u.email ?? undefined };
+  if (!account.anonymous) {
+    const rows = await must<{ display_name: string }[]>(sb().from("profiles").select("display_name").eq("id", u.id));
+    account.displayName = rows[0]?.display_name;
+  }
+  return account;
+}
+
+/**
+ * Turn the current anonymous user into a registered one (same user id, so all
+ * texts are kept). Supabase links the email first, then sets the password.
+ * Returns "confirm" when Supabase is waiting for the email to be confirmed.
+ */
+export async function signUp(displayName: string, email: string, password: string): Promise<"done" | "confirm"> {
+  const first = await sb().auth.updateUser({ email, data: { display_name: displayName } });
+  if (first.error) throw new Error(first.error.message);
+  const user = first.data.user as { email?: string | null; new_email?: string | null } | null;
+  if (!user?.email && user?.new_email) return "confirm"; // "Confirm email" is on in Supabase
+  const second = await sb().auth.updateUser({ password });
+  if (second.error) throw new Error(second.error.message);
+  return "done";
+}
+
+export async function signIn(email: string, password: string): Promise<void> {
+  const { error } = await sb().auth.signInWithPassword({ email, password });
+  if (error) throw new Error(error.message);
+}
+
+/** Sign out, then start a fresh anonymous space (every visitor needs a user). */
+export async function signOut(): Promise<void> {
+  const { error } = await sb().auth.signOut();
+  if (error) throw new Error(error.message);
+  await ensureSession();
+}
+
 // ---------- reads ----------
-type TextRow = { id: string; text: string; preset_id: string | null; created_at: string; plays: number };
+type TextRow = {
+  id: string;
+  text: string;
+  preset_id: string | null;
+  created_at: string;
+  plays: number;
+  is_mine: boolean;
+  author: string | null;
+};
 type PresetRow = { id: string; name: string; voice_uri: string | null; rate: number; pitch: number };
 
-export async function loadState(): Promise<{ texts: TextItem[]; presets: Preset[] }> {
+export async function loadState(scope: Scope = "mine"): Promise<{ texts: TextItem[]; presets: Preset[] }> {
   const [texts, presets] = await Promise.all([
-    must<TextRow[]>(sb().from("text_list").select("*").order("created_at", { ascending: false })),
+    must<TextRow[]>(sb().rpc("list_texts", { p_scope: scope })),
     must<PresetRow[]>(sb().from("presets").select("id,name,voice_uri,rate,pitch").order("created_at", { ascending: true })),
   ]);
   return {
-    texts: texts.map((r) => ({
+    texts: (texts ?? []).map((r) => ({
       id: r.id,
       text: r.text,
       presetId: r.preset_id ?? undefined,
       createdAt: new Date(r.created_at).getTime(),
       plays: r.plays ?? 0,
+      isMine: r.is_mine !== false,
+      author: r.author ?? undefined,
     })),
     presets: presets.map((r) => ({
       id: r.id,
@@ -87,8 +153,8 @@ export async function loadState(): Promise<{ texts: TextItem[]; presets: Preset[
   };
 }
 
-export const getStats = (days: number, tz: string) =>
-  must<Stats>(sb().rpc("get_stats", { p_days: days, p_tz: tz }));
+export const getStats = (days: number, tz: string, scope: StatsScope = "mine") =>
+  must<Stats>(sb().rpc("get_stats", { p_days: days, p_tz: tz, p_scope: scope }));
 
 /** Connection check for the status pill. */
 export const ping = () => must<{ ok: boolean }>(sb().rpc("ping"));

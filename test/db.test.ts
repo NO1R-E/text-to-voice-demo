@@ -72,7 +72,7 @@ describe("security: each visitor only sees their own data", () => {
     expect(await as(b, "select * from public.texts")).toEqual([]);
     expect(await as(b, "select * from public.presets")).toEqual([]);
     expect(await as(b, "select * from public.plays")).toEqual([]);
-    expect(await as(b, "select * from public.text_list")).toEqual([]);
+    expect(await as(b, "select * from public.list_texts('mine')")).toEqual([]);
     expect((await as(a, "select text from public.texts")).map((r) => r.text)).toEqual(["A's secret"]);
   });
 
@@ -99,7 +99,7 @@ describe("security: each visitor only sees their own data", () => {
     const pa = await addPreset(a);
     const ta = await addText(a, "A");
     await expect(addText(b, "x", pa)).rejects.toThrow(/foreign key/);
-    await expect(play(b, ta)).rejects.toThrow(/foreign key/);
+    await expect(play(b, ta)).rejects.toThrow(/row-level security|foreign key/);
   });
 
   it("clear_plays only clears the caller's history", async () => {
@@ -147,7 +147,7 @@ describe("data rules", () => {
     const t = await addText(u, "x");
     await play(u, t);
     await play(u, t);
-    expect((await as(u, "select plays from public.text_list"))[0].plays).toBe(2);
+    expect((await as(u, "select plays from public.list_texts('mine')"))[0].plays).toBe(2);
   });
 });
 
