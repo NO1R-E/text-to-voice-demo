@@ -30,7 +30,7 @@ describe("dashboard (from the database)", () => {
     await vi.waitFor(() => {
       expect(ui.$(".tile.wide .value").textContent).toBe("often");
     });
-    expect([...document.querySelectorAll(".hbar-label")].map((e) => e.textContent)).toEqual(["often", "rarely"]);
+    expect([...document.querySelectorAll('[data-card="top"] .hbar-label')].map((e) => e.textContent)).toEqual(["often", "rarely"]);
     expect(ui.$('[data-stat="plays"]').textContent).toBe("4");
     expect(ui.$('[data-stat="texts"]').textContent).toBe("2");
     expect(document.querySelectorAll("table tbody tr")).toHaveLength(2);
@@ -45,14 +45,32 @@ describe("dashboard (from the database)", () => {
     await vi.waitFor(() => expect(ui.$('[data-stat="plays"]').textContent).toBe("2"));
   });
 
-  it("resets play history after confirming", async () => {
+  it("has no way to reset or delete stats", async () => {
     const ui = await boot();
     ui.add("one");
-    ui.speak("one", 2);
+    ui.speak("one", 1);
     ui.openDashboard();
-    await vi.waitFor(() => expect(ui.$('[data-stat="plays"]').textContent).toBe("2"));
-    ui.$<HTMLButtonElement>("#clear-stats").click();
-    ui.$<HTMLButtonElement>("#confirm-yes").click();
-    await vi.waitFor(() => expect(ui.$('[data-stat="plays"]').textContent).toBe("0"));
+    await vi.waitFor(() => expect(ui.$('[data-stat="plays"]').textContent).toBe("1"));
+    expect(document.querySelector("#clear-stats, #confirm-yes")).toBeNull();
+    expect(document.getElementById("tab-dashboard")!.textContent).not.toMatch(/reset/i);
+  });
+
+  it("shows the new cards: listeners, Thai/English, busiest hours, top voices, who listened", async () => {
+    const ui = await boot();
+    ui.add("hello");
+    ui.add("สวัสดี");
+    ui.speak("hello", 2);
+    ui.speak("สวัสดี", 1);
+    ui.openDashboard();
+    await vi.waitFor(() => expect(ui.$('[data-stat="plays"]').textContent).toBe("3"));
+    expect(ui.$('[data-stat="listeners"]').textContent).toBe("1");
+    const langs = ui.$('[data-card="languages"]');
+    expect(langs.textContent).toMatch(/Thai/);
+    expect(langs.textContent).toMatch(/English/);
+    expect(langs.querySelectorAll(".seg")).toHaveLength(2);
+    expect(ui.$('[data-card="hours"]').querySelectorAll(".hour")).toHaveLength(24);
+    expect(ui.$('[data-card="voices"]').querySelectorAll(".hbar-row").length).toBeGreaterThan(0);
+    expect(ui.$('[data-card="listeners"]').textContent).toMatch(/You/);
+    expect(document.querySelector('[data-card="authors"]')).toBeNull(); // Overall only
   });
 });

@@ -44,7 +44,7 @@ describe("store (Supabase-backed)", () => {
     expect(store.texts).toHaveLength(0);
   });
 
-  it("saves play counts and clears them", async () => {
+  it("saves play counts, and there's no way to clear them", async () => {
     let store = await load();
     store.addText("a");
     const id = store.texts[0].id;
@@ -53,11 +53,17 @@ describe("store (Supabase-backed)", () => {
     expect(store.playCount(id)).toBe(2);
     store = await reload();
     expect(store.playCount(id)).toBe(2);
+    expect("clearStats" in store).toBe(false);
+  });
 
-    store.clearStats();
-    expect(store.playCount(id)).toBe(0);
+  it("registered users see Everyone by default; guests stay on Mine", async () => {
+    let store = await load();
+    expect(store.scope).toBe("mine"); // guest
+    await store.signUp("Ada", "ada@example.com", "secret123");
+    expect(store.scope).toBe("everyone");
+    await store.setScope("mine"); // a choice is remembered
     store = await reload();
-    expect(store.playCount(id)).toBe(0);
+    expect(store.scope).toBe("mine");
   });
 
   it("saves presets and their assignment; deleting a preset falls back to Auto", async () => {

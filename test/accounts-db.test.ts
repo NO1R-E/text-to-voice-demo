@@ -179,7 +179,7 @@ describe("plays and dashboard scopes", () => {
       ["B text", 2, "Bo"],
       ["A text", 1, "Ada"],
     ]);
-    expect(s.totals).toEqual({ plays: 3, chars: 9, texts: 2 });
+    expect(s.totals).toEqual({ plays: 3, chars: 9, texts: 2, listeners: 2 });
   });
 
   it("anonymous visitors can't ask for overall stats", async () => {
@@ -187,17 +187,55 @@ describe("plays and dashboard scopes", () => {
     await expect(stats(guest, "overall")).rejects.toThrow(/Sign up/);
   });
 
-  it("Reset stats clears plays on your texts, not your plays on others' texts", async () => {
+  it("play history can't be removed by anyone (no reset)", async () => {
     const a = await register("Ada");
     const b = await register("Bo");
     const ta = await addText(a, "A");
-    const tb = await addText(b, "B");
     await play(b, ta);
-    await play(a, tb);
-    await as(a, "select public.clear_plays()");
-    expect((await list(a, "everyone")).map((r) => [r.text, r.plays]).sort()).toEqual([
-      ["A", 0],
-      ["B", 1],
+    await play(a, ta);
+    await expect(as(a, "select public.clear_plays()")).rejects.toThrow(/does not exist/);
+    await expect(as(a, "delete from public.plays")).rejects.toThrow(/permission denied/);
+    await expect(as(b, "delete from public.plays")).rejects.toThrow(/permission denied/);
+    await expect(as(a, "update public.plays set chars = 0")).rejects.toThrow(/permission denied/);
+    expect((await list(a, "mine"))[0].plays).toBe(2);
+  });
+
+  it("extra dashboard numbers: listeners, Thai/English, hours, voices, who listened", async () => {
+    const a = await register("Ada");
+    const b = await register("Bo");
+    const en = await addText(a, "hello");
+    const th = await addText(a, "สวัสดี");
+    await as(a, "insert into public.plays (text_id, chars, voice_uri, played_at) values ($1, 5, 'voice-a', '2026-11-20 09:15+00')", [en]);
+    await as(b, "insert into public.plays (text_id, chars, voice_uri, played_at) values ($1, 5, 'voice-a', '2026-11-20 09:45+00')", [en]);
+    await as(b, "insert into public.plays (text_id, chars, voice_uri, played_at) values ($1, 6, 'voice-th', '2026-11-20 21:00+00')", [th]);
+    const s = await stats(a, "mine", 0);
+    expect(s.totals.listeners).toBe(2);
+    expect(s.languages).toEqual({ th: 1, en: 2 });
+    expect(s.hours).toHaveLength(24);
+    expect(s.hours[9]).toBe(2);
+    expect(s.hours[21]).toBe(1);
+    expect(s.voices).toEqual([
+      { voice: "voice-a", plays: 2 },
+      { voice: "voice-th", plays: 1 },
     ]);
+    expect(s.listenedBy).toEqual({ me: 1, others: 2 });
+    expect(s.authors).toBeNull(); // only in overall
+  });
+
+  it("Overall adds a top-authors leaderboard", async () => {
+    const a = await register("Ada");
+    const b = await register("Bo");
+    const ta = await addText(a, "A1");
+    const tb1 = await addText(b, "B1");
+    const tb2 = await addText(b, "B2");
+    await play(a, tb1);
+    await play(a, tb2);
+    await play(b, ta);
+    const s = await stats(a, "overall");
+    expect(s.authors).toEqual([
+      { author: "Bo", plays: 2, texts: 2 },
+      { author: "Ada", plays: 1, texts: 1 },
+    ]);
+    expect(s.listenedBy).toBeNull(); // only in mine
   });
 });

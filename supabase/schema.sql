@@ -172,9 +172,9 @@ create policy "plays: insert own" on public.plays for insert to authenticated
     user_id = (select auth.uid())
     and exists (select 1 from public.texts t where t.id = text_id)  -- visible to you (RLS applies)
   );
+-- Play history is permanent: there is no delete/update policy (and no grant), so nobody can
+-- remove or change plays. (Deleting a text still removes that text's plays with it.)
 drop policy if exists "plays: delete own" on public.plays;
-create policy "plays: delete own" on public.plays for delete to authenticated
-  using (user_id = (select auth.uid()));
 
 -- ---------- reads ----------
 drop view if exists public.text_list; -- replaced by list_texts()
@@ -218,18 +218,15 @@ language sql stable security invoker set search_path = '' as $$
   select jsonb_build_object('ok', true, 'signedIn', auth.uid() is not null)
 $$;
 
--- Reset stats: delete all plays of *your* texts (by anyone). Your plays of others' texts stay.
-create or replace function public.clear_plays() returns void
-language sql security definer set search_path = '' as $$
-  delete from public.plays p
-  using public.texts t
-  where t.id = p.text_id and t.user_id = auth.uid()
-$$;
+-- (v2.3: "Reset stats" was removed; play history can't be deleted.)
+drop function if exists public.clear_plays();
 
 -- Dashboard numbers.
 --   p_days:  7 / 30 / … (0 = all time)     p_tz: IANA time zone for day boundaries
 --   p_scope: 'mine'    = your texts, played by anyone
 --            'overall' = all registered users' texts (registered callers only)
+-- Returns range, totals (plays, chars, listeners, texts), top texts, daily series, Thai/English
+-- split, plays per hour of day (0–23), top voices, and authors (overall) or me-vs-others (mine).
 drop function if exists public.get_stats(integer, text);
 create or replace function public.get_stats(p_days integer default 30, p_tz text default 'UTC', p_scope text default 'mine')
 returns jsonb
@@ -279,47 +276,71 @@ begin
     from public.texts t left join public.profiles pr on pr.id = t.user_id
     where (not v_overall and t.user_id = v_uid) or (v_overall and pr.id is not null)
   ),
-  sp as (
-    select p.id, p.text_id, p.played_at, p.chars from public.plays p join s on s.id = p.text_id
+  sp as ( -- plays of those texts within the range
+    select p.id, p.text_id, p.user_id, p.played_at, p.chars, p.voice_uri, s.text, s.author
+    from public.plays p join s on s.id = p.text_id
+    where v_all or p.played_at >= v_since
   )
   select jsonb_build_object(
     'range', jsonb_build_object('days', p_days, 'start', to_char(v_start, 'YYYY-MM-DD'),
                                 'end', to_char(v_today, 'YYYY-MM-DD'), 'tz', p_tz, 'scope', p_scope),
     'totals', (
       select jsonb_build_object('plays', count(*)::int, 'chars', coalesce(sum(sp.chars), 0)::int,
+                                'listeners', count(distinct sp.user_id)::int,
                                 'texts', (select count(*)::int from s))
-      from sp where v_all or sp.played_at >= v_since),
+      from sp),
     'top', coalesce((
       select jsonb_agg(jsonb_build_object('id', x.id, 'text', x.text, 'author', x.author, 'plays', x.plays,
                                           'chars', x.chars,
                                           'lastPlayed', (extract(epoch from x.last_played) * 1000)::bigint)
                        order by x.plays desc, x.last_played desc)
-      from (select s.id, s.text, s.author, count(*)::int as plays, sum(sp.chars)::int as chars,
+      from (select sp.text_id as id, sp.text, sp.author, count(*)::int as plays, sum(sp.chars)::int as chars,
                    max(sp.played_at) as last_played
-            from sp join s on s.id = sp.text_id
-            where v_all or sp.played_at >= v_since
-            group by s.id, s.text, s.author) x), '[]'::jsonb),
+            from sp group by sp.text_id, sp.text, sp.author) x), '[]'::jsonb),
     'daily', (
       select jsonb_agg(jsonb_build_object('day', to_char(d.d, 'YYYY-MM-DD'), 'plays', d.n) order by d.d)
       from (select g::date as d, count(sp.id)::int as n
             from generate_series(v_start::timestamp, v_today::timestamp, interval '1 day') g
             left join sp on (sp.played_at at time zone p_tz)::date = g::date
-            group by g) d)
+            group by g) d),
+    'languages', (
+      select jsonb_build_object('th', count(*) filter (where sp.text ~ '[฀-๿]')::int,
+                                'en', count(*) filter (where sp.text !~ '[฀-๿]')::int)
+      from sp),
+    'hours', (
+      select jsonb_agg(coalesce(x.n, 0) order by h)
+      from generate_series(0, 23) h
+      left join (select extract(hour from sp.played_at at time zone p_tz)::int as hr, count(*)::int as n
+                 from sp group by 1) x on x.hr = h),
+    'voices', coalesce((
+      select jsonb_agg(jsonb_build_object('voice', v.voice_uri, 'plays', v.n) order by v.n desc, v.voice_uri)
+      from (select sp.voice_uri, count(*)::int as n from sp where sp.voice_uri is not null
+            group by sp.voice_uri order by n desc, sp.voice_uri limit 5) v), '[]'::jsonb),
+    'authors', case when v_overall then coalesce((
+      select jsonb_agg(jsonb_build_object('author', a.author, 'plays', a.n, 'texts', a.k) order by a.n desc, a.author)
+      from (select sp.author, count(*)::int as n, count(distinct sp.text_id)::int as k from sp
+            where sp.author is not null group by sp.author order by n desc, sp.author limit 5) a), '[]'::jsonb) end,
+    'listenedBy', case when not v_overall then (
+      select jsonb_build_object('me', count(*) filter (where sp.user_id = v_uid)::int,
+                                'others', count(*) filter (where sp.user_id <> v_uid)::int)
+      from sp) end
   ) into v_out;
   return v_out;
 end $$;
 
 -- ---------- privileges: signed-in (incl. anonymous) users only ----------
 revoke all on public.profiles, public.presets, public.texts, public.plays, public.user_settings from anon, public;
-grant select, insert, update, delete on public.presets, public.texts, public.plays, public.user_settings to authenticated;
+grant select, insert, update, delete on public.presets, public.texts, public.user_settings to authenticated;
+grant select, insert on public.plays to authenticated; -- plays are append-only
+revoke update, delete on public.plays from authenticated; -- (for projects created before v2.3)
 grant select on public.profiles to authenticated;
 grant update (display_name) on public.profiles to authenticated;
 
 revoke execute on function
-  public.get_stats(integer, text, text), public.clear_plays(), public.ping(), public.list_texts(text),
+  public.get_stats(integer, text, text), public.ping(), public.list_texts(text),
   public.is_registered(uuid), public.sync_profile(), public.touch_updated_at()
   from public, anon;
 grant execute on function
-  public.get_stats(integer, text, text), public.clear_plays(), public.list_texts(text), public.is_registered(uuid)
+  public.get_stats(integer, text, text), public.list_texts(text), public.is_registered(uuid)
   to authenticated;
 grant execute on function public.ping() to anon, authenticated;

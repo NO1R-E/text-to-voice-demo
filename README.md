@@ -90,6 +90,12 @@ Open **http://localhost:5173**.
 
 ### 3. Deploy to GitHub Pages
 
+There is no manual deploy command: **pushing to `main` deploys.** GitHub Actions runs `npm ci`, `npx tsc`, `npm test` and `npm run build`, then publishes `dist/`. A failing test stops the deploy. (`npm run build` on your PC only builds locally; `npm run preview` serves that build.) To redeploy without new code, open **Actions → Test and deploy to GitHub Pages → Run workflow**.
+
+When `supabase/schema.sql` changed, run it in the Supabase SQL editor **before** pushing.
+
+First-time setup:
+
 1. **GitHub repo → Settings → Secrets and variables → Actions → New repository secret**, and add:
    - `VITE_SUPABASE_URL`
    - `VITE_SUPABASE_ANON_KEY`
@@ -125,10 +131,10 @@ Open **Voice settings & presets**:
 - Voices in other languages are hidden.
 
 ### Dashboard
-Total plays, characters spoken, texts, the most-played text, a top-10 chart, plays per day, and a table view.
-- **Mine**: your texts, played by anyone.
-- **Overall** (registered users): the best texts across all registered users, with authors.
-- **Reset stats** deletes the play history of *your* texts (texts are kept).
+- **Tiles**: times read aloud, listeners (different people), characters spoken, texts, and the most-played text.
+- **Cards**: most played texts (top 10), plays per day, Thai vs English, busiest hours (your time zone), top voices, and either **who listens to your texts** (you vs others, in *Mine*) or **top authors** (in *Overall*). Hover any bar for details; **Table view** lists every text.
+- **Mine**: your texts, played by anyone. **Overall** (registered users): all registered users' texts.
+- Play history is permanent: there is no reset, and the database doesn't allow anyone to delete or change plays. (Deleting a text removes that text's plays with it.)
 
 ### Status pill
 Shows the Supabase connection: **Saved to database**, **Saving…**, **Last save failed**, or **Database offline**. Click it to re-check.
@@ -140,7 +146,7 @@ Shows the Supabase connection: **Saved to database**, **Saving…**, **Last save
 - **Sign out** returns to a fresh guest space.
 
 ### Mine / Everyone (registered users)
-Above the list, **Everyone** shows texts from all registered users. Others' bubbles show **"by Name"** and can be played (counted for that text) and copied, but not edited or deleted. **Mine** shows only your own.
+Above the list, **Everyone** (the default for registered users) shows texts from all registered users. Others' bubbles show **"by Name"** and can be played (counted for that text) and copied, but not edited or deleted. **Mine** shows only your own.
 
 **Others hear your text your way.** When someone plays your text, it uses *your* preset if the text has one, otherwise *your* default voice for its language, with your speed and pitch. The bubble says which (for example 🔊 "Ada's preset “Calm”"). Voices come from each device: if your voice isn't installed on theirs, they hear their own default voice for that language at your speed and pitch.
 
@@ -229,8 +235,7 @@ No front-end framework, no server, no paid services.
 | `texts` | id, user_id, text, preset_id, created_at, updated_at |
 | `plays` | one row per time a text is read aloud: user_id (who played), text_id, played_at, chars, voice_uri, preset_id |
 | `list_texts(p_scope)` | texts for the list: `mine` or `everyone`, with play counts, author, is_mine |
-| `get_stats(p_days, p_tz, p_scope)` | dashboard numbers: `mine` or `overall` |
-| `clear_plays()` | deletes the play history of the caller's texts |
+| `get_stats(p_days, p_tz, p_scope)` | dashboard numbers (`mine` or `overall`): totals, top texts, daily, Thai/English, hours, voices, authors / listeners |
 | `ping()` | connection check for the status pill |
 
 Composite foreign keys make sure a text can only use its owner's presets. A play can only be recorded for a text the player is allowed to see.

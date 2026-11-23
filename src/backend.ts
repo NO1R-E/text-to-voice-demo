@@ -58,9 +58,19 @@ export interface Preset {
 
 export interface Stats {
   range: { days: number; start: string; end: string; tz: string };
-  totals: { plays: number; chars: number; texts: number };
+  totals: { plays: number; chars: number; texts: number; listeners: number };
   top: { id: string; text: string; author?: string | null; plays: number; chars: number; lastPlayed: number }[];
   daily: { day: string; plays: number }[];
+  /** Plays by the text's language. */
+  languages: { th: number; en: number };
+  /** Plays per hour of day (0–23) in the viewer's time zone. */
+  hours: number[];
+  /** Most used voices (voiceURI). */
+  voices: { voice: string; plays: number }[];
+  /** Overall only: top authors. */
+  authors: { author: string; plays: number; texts: number }[] | null;
+  /** Mine only: plays of your texts by you vs by others. */
+  listenedBy: { me: number; others: number } | null;
 }
 
 const URL_ = import.meta.env.VITE_SUPABASE_URL as string | undefined;
@@ -247,4 +257,3 @@ export const insertPlay = (textId: string, chars: number, voiceURI?: string, pre
     sb().from("plays").insert({ text_id: textId, chars, voice_uri: voiceURI ?? null, preset_id: presetId ?? null }),
   );
 
-export const clearPlays = () => must(sb().rpc("clear_plays"));

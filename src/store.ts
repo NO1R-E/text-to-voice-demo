@@ -6,9 +6,10 @@ export type { Account, Preset, Scope, StatsScope, TextItem, VoiceDefaults } from
 const SCOPE_KEY = "task-voice:scope";
 function savedScope(): Scope {
   try {
-    return localStorage.getItem(SCOPE_KEY) === "everyone" ? "everyone" : "mine";
+    // Registered users see Everyone unless they chose Mine (guests always see Mine).
+    return localStorage.getItem(SCOPE_KEY) === "mine" ? "mine" : "everyone";
   } catch {
-    return "mine";
+    return "everyone";
   }
 }
 let account: Account | null = null;
@@ -317,11 +318,6 @@ export const store = {
   },
   playCount(id: string): number {
     return state.texts.find((t) => t.id === id)?.plays ?? 0;
-  },
-  clearStats(): void {
-    for (const t of state.texts) if (t.isMine) t.plays = 0; // resets plays of *your* texts
-    notify();
-    send(() => db.clearPlays());
   },
 };
 

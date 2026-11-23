@@ -102,14 +102,11 @@ describe("security: each visitor only sees their own data", () => {
     await expect(play(b, ta)).rejects.toThrow(/row-level security|foreign key/);
   });
 
-  it("clear_plays only clears the caller's history", async () => {
+  it("nobody can delete play history, not even their own plays", async () => {
     const a = await newUser();
-    const b = await newUser();
     await play(a, await addText(a, "a"));
-    await play(b, await addText(b, "b"));
-    await as(a, "select public.clear_plays()");
-    expect(await as(a, "select * from public.plays")).toHaveLength(0);
-    expect(await as(b, "select * from public.plays")).toHaveLength(1);
+    await expect(as(a, "delete from public.plays")).rejects.toThrow(/permission denied/);
+    expect(await as(a, "select * from public.plays")).toHaveLength(1);
   });
 });
 
@@ -161,7 +158,7 @@ describe("get_stats (dashboard)", () => {
     const pop = await addText(u, "popular");
     for (let i = 0; i < 3; i++) await play(u, pop, 7);
     const s = await stats(u, 7, "Asia/Bangkok");
-    expect(s.totals).toEqual({ plays: 4, chars: 25, texts: 2 });
+    expect(s.totals).toEqual({ plays: 4, chars: 25, texts: 2, listeners: 1 });
     expect(s.top.map((t: any) => [t.text, t.plays])).toEqual([
       ["popular", 3],
       ["rare", 1],
