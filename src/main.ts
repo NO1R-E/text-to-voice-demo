@@ -1,6 +1,6 @@
 import "./style.css";
 import { store, type Preset } from "./store";
-import { api } from "./api";
+import { ping } from "./backend";
 import {
   getVoices,
   isThai,
@@ -812,7 +812,7 @@ store.subscribe(() => {
 });
 // ---------- database status pill ----------
 const statusEl = document.getElementById("db-status") as HTMLButtonElement;
-let health: { state: "checking" | "ok" | "offline"; database?: string; latencyMs?: number } = { state: "checking" };
+let health: { state: "checking" | "ok" | "offline"; latencyMs?: number } = { state: "checking" };
 
 function renderStatus(): void {
   let state: string = health.state;
@@ -820,7 +820,7 @@ function renderStatus(): void {
   let title = "Click to check the database connection again";
   if (health.state === "offline") {
     label = "Database offline";
-    title = "Can't reach the API/database: changes won't be saved. Is `npm run dev` running? Click to retry.";
+    title = "Can't reach Supabase: changes won't be saved. Check your internet connection. Click to retry.";
   } else if (health.state === "ok") {
     if (store.pendingSaves > 0) {
       state = "saving";
@@ -831,7 +831,7 @@ function renderStatus(): void {
       title = `${store.error} Click to check again.`;
     } else {
       label = "Saved to database";
-      title = `Connected to PostgreSQL "${health.database}" (${health.latencyMs} ms). Click to check again.`;
+      title = `Connected to Supabase (${health.latencyMs} ms). Click to check again.`;
     }
   }
   statusEl.dataset.state = state;
@@ -844,8 +844,9 @@ async function checkHealth(): Promise<void> {
   if (checking) return;
   checking = true;
   try {
-    const h = await api<{ ok: boolean; database: string; latencyMs: number }>("GET", "/health");
-    health = { state: "ok", database: h.database, latencyMs: h.latencyMs };
+    const started = performance.now();
+    await ping();
+    health = { state: "ok", latencyMs: Math.round(performance.now() - started) };
   } catch {
     health = { state: "offline" };
   } finally {

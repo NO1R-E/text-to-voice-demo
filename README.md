@@ -1,80 +1,87 @@
 # Text Voice
 
-A small local web app for saving short texts as "speech bubbles" and having them read aloud, with voice presets, Thai/English handling, and a usage dashboard. Data is stored in PostgreSQL.
+A small web app for saving short texts as "speech bubbles" and having them read aloud, with voice presets, Thai/English handling, and a usage dashboard.
 
-- **Texts tab**: add, edit, delete, copy and search texts; play them with ▶ Speak
+**v2 (this branch)**: static front end on **GitHub Pages** + **Supabase** (Postgres, anonymous auth, Row Level Security). There is no server to run.
+**v1**: the local edition (Node API + local PostgreSQL) is kept at the git tag [`v1-local-postgres`](../../tree/v1-local-postgres).
+
+- **Texts**: add, edit, delete, copy and search texts; play them with ▶ Speak
 - **Voice presets**: named voice + speed + pitch, assignable per text
 - **Thai & English**: each text is read by a voice in its own language (detected automatically)
 - **Dashboard**: most-played texts, plays per day, totals (7 days / 30 days / all time)
+- **Private per visitor**: every visitor is signed in anonymously and only sees their own data
 - **Themes**: Auto (follows the browser/OS), Light, Dark
 
-Text-to-speech uses the browser's built-in [Web Speech API](https://developer.mozilla.org/docs/Web/API/Web_Speech_API): no API key, no cost, works offline with the voices installed on your system.
+Text-to-speech uses the browser's built-in [Web Speech API](https://developer.mozilla.org/docs/Web/API/Web_Speech_API): no API key, no cost, using the voices installed on the visitor's device.
+
+---
+
+## How it works
+
+```
+Browser (GitHub Pages) ──supabase-js + anon key──▶ Supabase
+                                                    ├─ Auth: anonymous sign-in (one user per browser)
+                                                    ├─ Postgres: presets, texts, plays
+                                                    └─ Row Level Security: user_id = auth.uid()
+```
+
+- The **anon key is public by design**. Security comes from Row Level Security (RLS) in [`supabase/schema.sql`](supabase/schema.sql): every row has a `user_id`, and visitors can only read and write rows where `user_id = auth.uid()`.
+- Not signed in (`anon` role) = no access to any table.
+- The dashboard numbers come from a Postgres function (`get_stats`) that also runs under RLS.
 
 ---
 
 ## Requirements
 
-| Tool | Version | Notes |
+| Tool | Version | Needed for |
 |---|---|---|
-| [Node.js](https://nodejs.org/) | **22 or newer** (developed on 24) | Includes `npm` |
-| [PostgreSQL](https://www.postgresql.org/download/) | **14 or newer** (developed on 18) | Running locally |
+| [Node.js](https://nodejs.org/) | **22 or newer** (developed on 24) | Building and running locally |
+| A [Supabase](https://supabase.com/) project | Free tier is fine | The database |
+| [PostgreSQL](https://www.postgresql.org/download/) | 14 or newer | **Only for running the tests** |
 | Browser | Microsoft Edge or Google Chrome | Edge has the best Thai voices |
-| Thai voice (optional) | Any `th-TH` voice | See [Thai voices](#thai-voices) |
 
 ---
 
-## Installation
+## Setup
 
-### 1. Clone and install packages
+### 1. Supabase project (once)
+
+1. Create a project at [supabase.com](https://supabase.com/).
+2. **Authentication → Sign In / Providers → enable "Allow anonymous sign-ins".**
+3. **SQL Editor → New query →** paste all of [`supabase/schema.sql`](supabase/schema.sql) → **Run**. It's safe to run again later.
+4. **Project Settings → API**: copy the **Project URL** and the **anon public** key.
+   Never use the `service_role` key in this app.
+
+### 2. Run locally
 
 ```bash
 git clone https://github.com/NO1R-E/text-to-voice-demo.git
 cd text-to-voice-demo
 npm install
-```
-
-### 2. Create the database
-
-Create an empty database (the name can be anything; this README uses `task-voice`):
-
-```bash
-psql -U postgres -c "CREATE DATABASE \"task-voice\";"
-```
-
-On Windows, if `psql` isn't on your PATH, use the full path, for example
-`"C:\Program Files\PostgreSQL\18\bin\psql.exe"`, or create the database in pgAdmin.
-
-You don't need to create tables: the API creates them automatically on startup.
-
-### 3. Configure the connection
-
-Copy the example file and put in your own Postgres password:
-
-```bash
 cp .env.example .env        # Windows PowerShell: Copy-Item .env.example .env
 ```
 
+Put your values in `.env`:
+
 ```env
-DATABASE_URL=postgresql://postgres:YOUR_PASSWORD@localhost:5432/task-voice
+VITE_SUPABASE_URL=https://YOUR-PROJECT-REF.supabase.co
+VITE_SUPABASE_ANON_KEY=YOUR-ANON-PUBLIC-KEY
 ```
-
-If the password contains `@ : / #`, URL-encode it (for example `@` → `%40`).
-`.env` is git-ignored: never commit it.
-
-### 4. Run
 
 ```bash
 npm run dev
 ```
 
-This starts both parts:
+Open **http://localhost:5173**.
 
-```
-[web] ➜ Local: http://localhost:5173/
-[api] API ready on http://127.0.0.1:8787 (database "task-voice")
-```
+### 3. Deploy to GitHub Pages
 
-Open **http://localhost:5173**. Press `Ctrl + C` to stop both.
+1. **GitHub repo → Settings → Secrets and variables → Actions → New repository secret**, and add:
+   - `VITE_SUPABASE_URL`
+   - `VITE_SUPABASE_ANON_KEY`
+2. **Settings → Pages → Build and deployment → Source: GitHub Actions.**
+3. Push to `main`. The workflow [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) type-checks, runs all tests, builds and deploys.
+4. The site appears at `https://<your-user>.github.io/<repo-name>/`.
 
 ---
 
@@ -82,9 +89,9 @@ Open **http://localhost:5173**. Press `Ctrl + C` to stop both.
 
 ### Texts
 1. Type in the box and press **Enter** (or **Add text**). `Shift + Enter` adds a new line. Max 1,000 characters.
-2. Optionally pick a **voice preset** in the dropdown before adding.
+2. Optionally pick a **voice preset** first. With an empty box all presets are listed, grouped by language.
 3. On each bubble:
-   - **▶ Speak** / **■ Stop**: read it aloud (each play is counted for the dashboard)
+   - **▶ Speak** / **■ Stop**: read it aloud (counted on the dashboard)
    - **✎ Edit**: change the text (Enter saves, Esc cancels)
    - **Copy icon**: copy the full text
    - **✕**: delete the text and its play history
@@ -94,7 +101,9 @@ Open **http://localhost:5173**. Press `Ctrl + C` to stop both.
 ### Voices & presets
 Open **Voice settings & presets**:
 - **Default voices**: one for Thai text and one for English text, with shared speed and pitch. **▶ Preview** plays a sample.
-- **Presets**: **+ New preset**, then name it and pick a voice, speed and pitch. Presets are grouped by language. **✎ Edit** opens a preset; **▶ Test** plays it.
+- **Presets**: **+ New preset**, then name it and pick a voice, speed and pitch. Presets are grouped by language. **✎ Edit** opens one; **▶ Test** plays it.
+
+Default voices and the theme are saved per browser (localStorage). Texts, presets and plays are saved in Supabase.
 
 ### Thai & English
 - Any Thai character makes a text **Thai**; everything else is **English**.
@@ -102,19 +111,19 @@ Open **Voice settings & presets**:
 - Voices in other languages are hidden.
 
 ### Dashboard
-Shows total plays, characters spoken, saved texts, the most-played text, a top-10 chart, plays per day, and a table view. **Reset stats** deletes play history (texts are kept).
+Total plays, characters spoken, saved texts, the most-played text, a top-10 chart, plays per day, and a table view. **Reset stats** deletes your play history (texts are kept).
 
 ### Status pill
-The pill above the add box shows the database connection: **Saved to database**, **Saving…**, **Last save failed**, or **Database offline**. Click it to re-check.
+Shows the Supabase connection: **Saved to database**, **Saving…**, **Last save failed**, or **Database offline**. Click it to re-check.
 
-### Moving data from older versions
-Earlier versions stored data in the browser (localStorage). The first time a browser opens this version, that data is imported into Postgres once; the browser copy is kept as a backup.
+### "Your data" means this browser
+Each browser gets its own anonymous Supabase user, stored in that browser. Clearing site data, or opening the site in another browser or device, starts a new, empty space.
 
 ---
 
 ## Thai voices
 
-Which voices you have depends on your OS and browser:
+Voices come from the visitor's device:
 
 - **Windows**: *Microsoft Pattara* (th-TH). If missing: **Settings › Time & language › Speech › Add voices › Thai**.
 - **Microsoft Edge**: adds online neural Thai voices (Premwadee, Niwat).
@@ -128,91 +137,75 @@ If Thai text exists but no Thai voice is installed, the app shows a warning.
 
 | Command | What it does |
 |---|---|
-| `npm run dev` | Website (port 5173) + API (port 8787) together, with auto-reload |
-| `npm run dev:web` | Website only |
-| `npm run dev:api` | API only |
+| `npm run dev` | Local dev server on http://localhost:5173 |
+| `npm run build` | Type-check and build into `dist/` |
+| `npm run preview` | Serve the built `dist/` locally |
 | `npm test` | Run all tests once |
 | `npm run test:watch` | Re-run tests on every save |
-| `npm run build` | Type-check and build the website into `dist/` |
 
 ### Tests
+
+Tests don't touch your Supabase project. They run against a **local PostgreSQL** made to behave like Supabase:
+- [`test/supabase-shim.sql`](test/supabase-shim.sql) adds the `anon` and `authenticated` roles, `auth.users` and `auth.uid()`;
+- then the real [`supabase/schema.sql`](supabase/schema.sql) is applied;
+- [`test/fake-supabase.ts`](test/fake-supabase.ts) stands in for `@supabase/supabase-js` and runs each request as the signed-in visitor, so RLS, constraints and SQL functions are really exercised.
+
+Setup: put a local Postgres URL in `.env` as `DATABASE_URL`. The tests create and rebuild a separate database named `<name>_test`, and refuse to run against any database whose name doesn't end in `_test`. The first run also creates the login-less roles `anon` and `authenticated` on that Postgres server.
 
 ```bash
 npm test
 ```
 
-Tests run against a **separate database** named after yours plus `_test` (for example `task-voice_test`). It is created automatically. The test setup refuses to wipe any database whose name doesn't end in `_test`, so your real data is never touched. Postgres must be running.
+In CI, GitHub Actions starts a throwaway Postgres for this.
 
 ---
 
 ## Dependencies
 
-**Runtime**
+| Package | Type | Used for |
+|---|---|---|
+| [`@supabase/supabase-js`](https://supabase.com/docs/reference/javascript) | runtime | Database queries and anonymous auth from the browser |
+| `vite` | dev | Dev server and build |
+| `typescript` | dev | Type checking |
+| `vitest`, `jsdom` | dev | Unit and UI tests (with a fake speech engine) |
+| `pg`, `@types/pg` | dev | Tests: talk to the local test database |
+| `@types/node` | dev | Type definitions |
 
-| Package | Used for |
-|---|---|
-| [`hono`](https://hono.dev/) | API routes (`server/app.ts`) |
-| [`@hono/node-server`](https://github.com/honojs/node-server) | Runs the Hono API on Node |
-| [`pg`](https://node-postgres.com/) | PostgreSQL client |
-
-**Development**
-
-| Package | Used for |
-|---|---|
-| `vite` | Dev server and build for the website; forwards `/api` requests to the API |
-| `typescript` | Type checking |
-| `tsx` | Runs the TypeScript API directly, with watch mode |
-| `concurrently` | Runs website + API with one command |
-| `vitest`, `jsdom` | Unit and UI tests (with a fake speech engine) |
-| `@types/node`, `@types/pg` | Type definitions |
-
-No front-end framework and no paid services.
+No front-end framework, no server, no paid services.
 
 ---
 
 ## Project structure
 
 ```
-├── index.html            Page shell (applies the saved theme before first paint)
-├── src/                  Front end (TypeScript, no framework)
-│   ├── main.ts           Texts tab, presets, search/sort, status pill, theme switch
-│   ├── dashboard.ts      Dashboard tab (reads /api/stats)
-│   ├── store.ts          In-memory state + ordered saves to the API
-│   ├── tts.ts            Speech: Thai/English detection, voice choice, speaking
-│   ├── api.ts            fetch wrapper + types
-│   ├── theme.ts          Auto / Light / Dark
+├── index.html               Page shell (applies the saved theme before first paint)
+├── src/
+│   ├── main.ts              Texts tab, presets, search/sort, status pill, theme switch
+│   ├── dashboard.ts         Dashboard tab (Supabase get_stats)
+│   ├── store.ts             In-memory state + ordered saves
+│   ├── backend.ts           All Supabase calls (auth, tables, functions)
+│   ├── tts.ts               Speech: Thai/English detection, voice choice, speaking
+│   ├── theme.ts             Auto / Light / Dark
 │   └── style.css
-├── server/               API (Node + Hono + pg)
-│   ├── index.ts          Entry point: loads .env, creates tables, listens on 127.0.0.1:8787
-│   ├── app.ts            Routes and validation
-│   └── db.ts             Schema (presets, texts, plays)
-├── test/                 Vitest tests (API, store, UI, Thai/English, dashboard…)
-├── .env.example          Template for .env
-└── vite.config.ts        Proxies /api → http://127.0.0.1:8787
+├── supabase/schema.sql      Tables, RLS policies, view, functions (paste into Supabase)
+├── test/                    Vitest tests + local Supabase stand-in
+├── .github/workflows/       Test + deploy to GitHub Pages
+└── .env.example             Template for .env
 ```
 
-### Database tables
+### Database
 
-| Table | Holds |
+| Object | What it is |
 |---|---|
-| `texts` | id, text, preset_id, created_at, updated_at |
-| `presets` | id, name, voice_uri, rate, pitch, created_at |
-| `plays` | one row per time a text is read aloud: text_id, played_at, chars, voice_uri, preset_id |
+| `presets` | id, user_id, name, voice_uri, rate, pitch, created_at |
+| `texts` | id, user_id, text, preset_id, created_at, updated_at |
+| `plays` | one row per time a text is read aloud: user_id, text_id, played_at, chars, voice_uri, preset_id |
+| `text_list` (view) | texts with their play counts |
+| `get_stats(p_days, p_tz)` | dashboard numbers for the caller |
+| `clear_plays()` | deletes the caller's play history |
+| `ping()` | connection check for the status pill |
 
-### API
-
-All under `/api`. The API only listens on `127.0.0.1` (this computer).
-
-| Method | Path | Purpose |
-|---|---|---|
-| GET | `/health` | Database reachable? Returns database name and latency |
-| GET | `/state` | All texts (with play counts) and presets |
-| POST / PATCH / DELETE | `/texts`, `/texts/:id` | Create / edit / delete a text |
-| POST / PATCH / DELETE | `/presets`, `/presets/:id` | Create / edit / delete a preset |
-| POST | `/texts/:id/plays` | Record a play |
-| DELETE | `/plays` | Reset play history |
-| GET | `/stats?days=7\|30\|0&tz=Asia/Bangkok` | Dashboard numbers |
-| POST | `/import` | One-time import of old browser data |
+Composite foreign keys make sure a text can only use its owner's presets, and plays can only reference the player's own texts.
 
 ---
 
@@ -220,9 +213,10 @@ All under `/api`. The API only listens on `127.0.0.1` (this computer).
 
 | Problem | Fix |
 |---|---|
-| `Port 5173 is in use` | Another dev server is running. Close it, or find it with `netstat -ano \| findstr :5173` |
-| Pill says **Database offline** | Is `npm run dev` running? Is Postgres running? Check `DATABASE_URL` in `.env` |
-| `password authentication failed` | Wrong user or password in `DATABASE_URL` |
-| `database "…" does not exist` | Create it (step 2 of Installation) |
+| "Supabase isn't configured" | Set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` in `.env` (locally) or in the GitHub secrets (Pages), then restart or redeploy |
+| "Anonymous sign-ins are disabled" | Supabase → Authentication → enable anonymous sign-ins |
+| `relation "public.text_list" does not exist` | Run `supabase/schema.sql` in the Supabase SQL editor |
+| Pill says **Database offline** | Check your internet connection. Free Supabase projects pause after inactivity; resume yours in the Supabase dashboard |
+| Pages site loads but shows a blank page | Check that Pages → Source is "GitHub Actions", and that the workflow succeeded |
 | Thai text is silent or sounds wrong | Install a Thai voice, or use Microsoft Edge |
-| No sound at all | Check system volume; some browsers need a click on the page before speaking |
+| `Port 5173 is in use` | Another dev server is running; close it |

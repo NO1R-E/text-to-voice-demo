@@ -1,8 +1,14 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import pg from "pg";
-import { migrate } from "../server/db";
 import { databaseName, testDatabaseUrl } from "./db-url";
 
-/** Runs once before all tests: create the _test database if needed and apply the schema. */
+const read = (p: string) => readFileSync(fileURLToPath(new URL(p, import.meta.url)), "utf8");
+
+/**
+ * Runs once before all tests: create the _test database if needed, then rebuild it
+ * from scratch as a mini "Supabase" (shim) + our real schema (supabase/schema.sql).
+ */
 export default async function () {
   const testUrl = testDatabaseUrl();
   const name = databaseName(testUrl);
@@ -18,10 +24,13 @@ export default async function () {
     await admin.end();
   }
 
-  const pool = new pg.Pool({ connectionString: testUrl });
+  const client = new pg.Client({ connectionString: testUrl });
+  await client.connect();
   try {
-    await migrate(pool);
+    await client.query("drop schema if exists public cascade; drop schema if exists auth cascade; create schema public;");
+    await client.query(read("./supabase-shim.sql"));
+    await client.query(read("../supabase/schema.sql"));
   } finally {
-    await pool.end();
+    await client.end();
   }
 }

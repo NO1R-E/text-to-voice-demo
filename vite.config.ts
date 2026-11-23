@@ -1,9 +1,7 @@
 import { defineConfig } from "vite";
 
 export default defineConfig({
+  // GitHub Pages serves the site under /<repo-name>/; the deploy workflow sets BASE_PATH.
+  base: process.env.BASE_PATH ?? "/",
   build: { target: "es2022" }, // main.ts uses top-level await
-  server: {
-    // The browser calls /api/...; Vite forwards it to the local Node API.
-    proxy: { "/api": "http://127.0.0.1:8787" },
-  },
 });

@@ -1,4 +1,4 @@
-import { api, type Stats } from "./api";
+import { getStats, type Stats } from "./backend";
 import { store } from "./store";
 import { esc } from "./util";
 
@@ -37,7 +37,7 @@ export async function renderDashboard(root: HTMLElement): Promise<void> {
   let s: Stats;
   try {
     await store.whenIdle();
-    s = await api<Stats>("GET", `/stats?days=${range}&tz=${encodeURIComponent(tz)}`);
+    s = await getStats(range, tz);
   } catch (e) {
     if (token === renderToken) {
       root.innerHTML = `<p class="notice" role="alert">Couldn't load dashboard data from the database: ${esc(

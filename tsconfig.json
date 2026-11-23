@@ -9,5 +9,5 @@
     "skipLibCheck": true,
     "noUnusedLocals": true
   },
-  "include": ["src", "server"]
+  "include": ["src"]
 }

@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { fakeSupabase } from "./setup";
 
 async function boot() {
   await import("../src/main");
@@ -113,18 +114,18 @@ describe("database status pill", () => {
     expect(ui.$("#db-status").textContent).toMatch(/database/i);
   });
 
-  it("shows offline when the API can't be reached, and recovers on click", async () => {
+  it("shows offline when Supabase can't be reached, and recovers on click", async () => {
     const ui = await boot();
     await vi.waitFor(() => expect(ui.$("#db-status").dataset.state).toBe("ok"));
+    expect(ui.$("#db-status").title).toMatch(/Supabase/);
 
-    const realFetch = globalThis.fetch;
-    globalThis.fetch = (() => Promise.reject(new TypeError("Failed to fetch"))) as typeof fetch;
+    fakeSupabase.offline = true;
     try {
       ui.$<HTMLButtonElement>("#db-status").click();
       await vi.waitFor(() => expect(ui.$("#db-status").dataset.state).toBe("offline"));
       expect(ui.$("#db-status").textContent).toMatch(/offline/i);
     } finally {
-      globalThis.fetch = realFetch;
+      fakeSupabase.offline = false;
     }
     ui.$<HTMLButtonElement>("#db-status").click();
     await vi.waitFor(() => expect(ui.$("#db-status").dataset.state).toBe("ok"));

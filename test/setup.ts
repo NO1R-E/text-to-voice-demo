@@ -1,13 +1,11 @@
 import { afterAll, beforeEach, vi } from "vitest";
 import pg from "pg";
-import { createApp } from "../server/app";
 import { testDatabaseUrl } from "./db-url";
 
-// ---------- real API + test database behind fetch("/api/...") ----------
+// ---------- "Supabase" = local *_test database + fake client (see fake-supabase.ts) ----------
 export const testPool = new pg.Pool({ connectionString: testDatabaseUrl() });
-const app = createApp(testPool);
-globalThis.fetch = ((input: string | URL, init?: RequestInit) =>
-  app.request(String(input), init)) as typeof fetch;
+export const fakeSupabase = { pool: testPool, offline: false };
+(globalThis as any).__fakeSupabase = fakeSupabase;
 
 /** Wait for whatever the current store instance still has in flight. */
 export const storeIdle = async () => {
@@ -49,7 +47,8 @@ if (browser) {
 
 beforeEach(async () => {
   await storeIdle(); // let the previous test's saves land before wiping
-  await testPool.query("truncate plays, texts, presets restart identity cascade");
+  fakeSupabase.offline = false;
+  await testPool.query("truncate public.plays, public.texts, public.presets, auth.users restart identity cascade");
   voices.splice(0, voices.length, ...allVoices);
   synth.speak.mockClear();
   synth.cancel.mockClear();
