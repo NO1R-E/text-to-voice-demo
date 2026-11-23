@@ -1,20 +1,35 @@
 # Text Voice
 
-A small web app for saving short texts as "speech bubbles" and having them read aloud, with voice presets, Thai/English handling, and a usage dashboard.
+A small web app for saving short texts as "speech bubbles" and having them read aloud, with voice presets, Thai/English handling, shared texts, and a usage dashboard.
 
-**v2 (this branch)**: static front end on **GitHub Pages** + **Supabase** (Postgres, anonymous auth, Row Level Security). There is no server to run.
-**v1**: the local edition (Node API + local PostgreSQL) is kept at the git tag [`v1-local-postgres`](../../tree/v1-local-postgres).
+## ▶ Live demo: **https://no1r-e.github.io/text-to-voice-demo/**
 
-- **Texts**: add, edit, delete, copy and search texts; play them with ▶ Speak
-- **Voice presets**: named voice + speed + pitch, assignable per text
-- **Thai & English**: each text is read by a voice in its own language (detected automatically)
-- **Dashboard**: most-played texts, plays per day, totals (7 days / 30 days / all time)
-- **Guests and accounts**: visitors start as private guests (anonymous); **Sign up** keeps their texts and lets them share with other registered users
-- **Mine / Everyone**: registered users can browse each other's texts read-only, play and copy them
-- **Dashboard Mine / Overall**: your texts' stats, or the best texts across all registered users
-- **Themes**: Auto (follows the browser/OS), Light, Dark
+No install or account needed: open the link and start typing. Best in **Microsoft Edge** (it has the most natural voices, including Thai).
 
-Text-to-speech uses the browser's built-in [Web Speech API](https://developer.mozilla.org/docs/Web/API/Web_Speech_API): no API key, no cost, using the voices installed on the visitor's device.
+### Try it in a minute
+1. Type a text (English or Thai) and press **Enter**, then **▶ Speak**.
+2. Open **Voice settings & presets** to pick voices, speed and pitch, or save a **preset**.
+3. **Sign up** (top right) to keep your texts on any device and to see **Everyone**'s shared texts.
+4. Open the **Dashboard** to see what gets played most, by whom, and when.
+
+---
+
+## Features
+
+- **Texts as speech bubbles**: add, edit, delete, copy and search; sort by most played, newest or oldest; long texts fold to 4 lines
+- **Read aloud** with the browser's voices; each text can use a **voice preset** (voice + speed + pitch)
+- **Thai & English**: the language is detected automatically, and each text is read by a voice in its own language
+- **Default voices per account**: one Thai and one English default, like a built-in preset, saved to your account
+- **Guests and accounts**: visitors start as private guests; **Sign up** keeps everything they made
+- **Shared texts**: registered users see each other's texts (**Mine / Everyone**), can play and copy them but not change them, and hear them **the way the owner set them up**
+- **Dashboard** (**Mine / Overall**, 7 days / 30 days / all time): plays, listeners, most played, plays per day, Thai vs English, busiest hours, top voices, top authors
+- **Status pill** showing the live database connection; **themes**: Auto / Light / Dark
+
+Text-to-speech uses the browser's built-in [Web Speech API](https://developer.mozilla.org/docs/Web/API/Web_Speech_API): no API key and no cost, using the voices installed on the visitor's device.
+
+### Versions
+- **`main`** (live): static front end on **GitHub Pages** + **Supabase**. No server to run.
+- **[`v1-local-postgres`](../../tree/v1-local-postgres)** (tag): the original local edition (Node API + local PostgreSQL).
 
 ---
 
@@ -22,9 +37,9 @@ Text-to-speech uses the browser's built-in [Web Speech API](https://developer.mo
 
 ```
 Browser (GitHub Pages) ──supabase-js + anon key──▶ Supabase
-                                                    ├─ Auth: anonymous sign-in (one user per browser)
-                                                    ├─ Postgres: presets, texts, plays
-                                                    └─ Row Level Security: user_id = auth.uid()
+                                                    ├─ Auth: anonymous guests + email/password accounts
+                                                    ├─ Postgres: texts, presets, plays, profiles, user_settings
+                                                    └─ Row Level Security on every table
 ```
 
 The **anon key is public by design**. Security comes from Row Level Security (RLS) in [`supabase/schema.sql`](supabase/schema.sql):
@@ -101,7 +116,7 @@ First-time setup:
    - `VITE_SUPABASE_ANON_KEY`
 2. **Settings → Pages → Build and deployment → Source: GitHub Actions.**
 3. Push to `main`. The workflow [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) type-checks, runs all tests, builds and deploys.
-4. The site appears at `https://<your-user>.github.io/<repo-name>/`.
+4. The site appears at `https://<your-user>.github.io/<repo-name>/` (this repo: https://no1r-e.github.io/text-to-voice-demo/).
 
 ---
 
@@ -219,7 +234,7 @@ No front-end framework, no server, no paid services.
 │   ├── tts.ts               Speech: Thai/English detection, voice choice, speaking
 │   ├── theme.ts             Auto / Light / Dark
 │   └── style.css
-├── supabase/schema.sql      Tables, RLS policies, view, functions (paste into Supabase)
+├── supabase/schema.sql      Tables, RLS policies, functions (paste into Supabase; upgrades in place)
 ├── test/                    Vitest tests + local Supabase stand-in
 ├── .github/workflows/       Test + deploy to GitHub Pages
 └── .env.example             Template for .env
@@ -248,9 +263,8 @@ Composite foreign keys make sure a text can only use its owner's presets. A play
 |---|---|
 | "Supabase isn't configured" | Set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` in `.env` (locally) or in the GitHub secrets (Pages), then restart or redeploy |
 | "Anonymous sign-ins are disabled" | Supabase → Authentication → enable anonymous sign-ins |
-| `function public.list_texts does not exist` | Run the latest `supabase/schema.sql` in the SQL editor |
+| `function public.list_texts does not exist`, or new dashboard cards stay empty | Run the latest `supabase/schema.sql` in the SQL editor |
 | Sign up says "check your email" | "Confirm email" is on in Supabase; turn it off for the demo, or confirm via the email link |
-| `relation "public.text_list" does not exist` | Run `supabase/schema.sql` in the Supabase SQL editor |
 | Pill says **Database offline** | Check your internet connection. Free Supabase projects pause after inactivity; resume yours in the Supabase dashboard |
 | Pages site loads but shows a blank page | Check that Pages → Source is "GitHub Actions", and that the workflow succeeded |
 | Thai text is silent or sounds wrong | Install a Thai voice, or use Microsoft Edge |
