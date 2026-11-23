@@ -17,6 +17,16 @@ export interface TextItem {
   isMine: boolean;
   /** Display name of the author (registered users only). */
   author?: string;
+  /** How the owner wants it to sound: their preset, or their default voice for its language. */
+  playback?: Playback;
+}
+
+export interface Playback {
+  source: "preset" | "default";
+  presetName?: string;
+  voiceURI?: string;
+  rate: number;
+  pitch: number;
 }
 
 /** Who is using this browser. Everyone has a Supabase user; visitors are anonymous. */
@@ -132,6 +142,11 @@ type TextRow = {
   plays: number;
   is_mine: boolean;
   author: string | null;
+  play_source: "preset" | "default" | null;
+  play_preset: string | null;
+  play_voice: string | null;
+  play_rate: number | null;
+  play_pitch: number | null;
 };
 type PresetRow = { id: string; name: string; voice_uri: string | null; rate: number; pitch: number };
 
@@ -149,6 +164,13 @@ export async function loadState(scope: Scope = "mine"): Promise<{ texts: TextIte
       plays: r.plays ?? 0,
       isMine: r.is_mine !== false,
       author: r.author ?? undefined,
+      playback: {
+        source: r.play_source === "preset" ? "preset" : "default",
+        presetName: r.play_preset ?? undefined,
+        voiceURI: r.play_voice ?? undefined,
+        rate: Number(r.play_rate ?? 1),
+        pitch: Number(r.play_pitch ?? 1),
+      },
     })),
     presets: presets.map((r) => ({
       id: r.id,

@@ -142,6 +142,8 @@ Shows the Supabase connection: **Saved to database**, **Saving…**, **Last save
 ### Mine / Everyone (registered users)
 Above the list, **Everyone** shows texts from all registered users. Others' bubbles show **"by Name"** and can be played (counted for that text) and copied, but not edited or deleted. **Mine** shows only your own.
 
+**Others hear your text your way.** When someone plays your text, it uses *your* preset if the text has one, otherwise *your* default voice for its language, with your speed and pitch. The bubble says which (for example 🔊 "Ada's preset “Calm”"). Voices come from each device: if your voice isn't installed on theirs, they hear their own default voice for that language at your speed and pitch.
+
 ---
 
 ## Thai voices

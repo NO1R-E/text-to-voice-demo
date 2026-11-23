@@ -1,5 +1,5 @@
 import "./style.css";
-import { store, type Preset } from "./store";
+import { store, type Preset, type TextItem } from "./store";
 import { ping } from "./backend";
 import {
   getVoices,
@@ -739,9 +739,41 @@ function renderList(): void {
   }
 }
 
+/**
+ * How someone else's text is spoken here: the owner's voice (their preset, or their default
+ * for the text's language) with the owner's speed and pitch. If that voice isn't installed
+ * on this device, this user's default voice for the language is used, still at the owner's
+ * speed and pitch.
+ */
+function othersSettings(t: TextItem): VoiceSettings & { ownerVoiceHere: boolean } {
+  const lang = languageOf(t.text);
+  const pb = t.playback;
+  const owners = getVoices().find((v) => v.voiceURI === pb?.voiceURI);
+  const ownerVoiceHere = !!owners && voiceLanguage(owners) === lang;
+  return {
+    voiceURI: ownerVoiceHere ? owners!.voiceURI : settings.voices[lang],
+    rate: pb?.rate ?? settings.rate,
+    pitch: pb?.pitch ?? settings.pitch,
+    ownerVoiceHere,
+  };
+}
+
+/** "Ada's preset “Calm”" / "Ada's default voice", with details on hover. */
+function voiceInfo(t: TextItem): string {
+  const who = `${t.author ?? "Owner"}'s`;
+  const pb = t.playback;
+  const label = pb?.source === "preset" && pb.presetName ? `${who} preset “${pb.presetName}”` : `${who} default voice`;
+  const s = othersSettings(t);
+  const used = getVoices().find((v) => v.voiceURI === s.voiceURI) ?? autoVoice(languageOf(t.text));
+  const detail = s.ownerVoiceHere
+    ? `${used?.name ?? "voice"} · ${fmtRate(s.rate)} · pitch ${fmtPitch(s.pitch)}`
+    : `${who} voice is not on this device, so ${used?.name ?? "your default voice"} is used · ${fmtRate(s.rate)} · pitch ${fmtPitch(s.pitch)}`;
+  return `<span class="voice-info" title="${esc(detail)}">🔊 ${esc(label)}</span>`;
+}
+
 /** Another registered user's text: read-only (play + copy), with its author. */
 function othersBubble(
-  t: { id: string; plays: number; author?: string },
+  t: TextItem,
   v: { playing: boolean; long: boolean; open: boolean; body: string; lang: Lang },
 ): string {
   return `
@@ -754,6 +786,7 @@ function othersBubble(
             <div class="bubble-tools">
               ${v.lang === "th" ? `<span class="lang-tag" title="Thai text: read with a Thai voice">ไทย</span>` : ""}
               <span class="author">by ${esc(t.author ?? "someone")}</span>
+              ${voiceInfo(t)}
             </div>
             <div class="actions">
               <span class="meta">${t.plays} play${t.plays === 1 ? "" : "s"}</span>
@@ -802,7 +835,7 @@ list.addEventListener("click", (e) => {
   if (!item.isMine && !["speak", "copy", "more"].includes(el.dataset.act ?? "")) return;
   switch (el.dataset.act) {
     case "speak":
-      say(item.text, settingsFor(item.text, item.isMine ? item.presetId : undefined), id, id);
+      say(item.text, item.isMine ? settingsFor(item.text, item.presetId) : othersSettings(item), id, id);
       break;
     case "edit":
       editingId = id;

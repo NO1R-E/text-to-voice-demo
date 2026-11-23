@@ -180,18 +180,33 @@ create policy "plays: delete own" on public.plays for delete to authenticated
 drop view if exists public.text_list; -- replaced by list_texts()
 
 -- Texts for the Texts tab. p_scope: 'mine' | 'everyone' (everyone = registered users only).
--- Play counts include everyone's plays; others' preset choices are not exposed.
-create or replace function public.list_texts(p_scope text default 'mine')
-returns table (id uuid, text text, preset_id uuid, created_at timestamptz, plays integer, is_mine boolean, author text)
+-- Play counts include everyone's plays; others' preset *choice* (id) is not exposed, but how each
+-- text should sound is: the owner's preset, or for Auto texts the owner's default voice for the
+-- text's language (Thai if it has any Thai character), so everyone hears it the owner's way.
+drop function if exists public.list_texts(text); -- return columns changed in v2.2
+create function public.list_texts(p_scope text default 'mine')
+returns table (
+  id uuid, text text, preset_id uuid, created_at timestamptz, plays integer, is_mine boolean, author text,
+  play_source text, play_preset text, play_voice text, play_rate double precision, play_pitch double precision
+)
 language sql stable security definer set search_path = '' as $$
   select t.id, t.text,
          case when t.user_id = auth.uid() then t.preset_id end,
          t.created_at,
          (select count(*)::int from public.plays p where p.text_id = t.id),
          t.user_id = auth.uid(),
-         pr.display_name
+         pr.display_name,
+         case when ps.id is not null then 'preset' else 'default' end,
+         ps.name,
+         case when ps.id is not null then ps.voice_uri
+              when t.text ~ '[฀-๿]' then us.voice_th
+              else us.voice_en end,
+         coalesce(ps.rate, us.rate, 1),
+         coalesce(ps.pitch, us.pitch, 1)
   from public.texts t
-  left join public.profiles pr on pr.id = t.user_id
+  left join public.profiles pr      on pr.id = t.user_id
+  left join public.presets ps       on ps.id = t.preset_id and ps.user_id = t.user_id
+  left join public.user_settings us on us.user_id = t.user_id
   where t.user_id = auth.uid()
      or (p_scope = 'everyone' and public.is_registered(auth.uid()) and pr.id is not null)
   order by t.created_at desc

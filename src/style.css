@@ -372,3 +372,6 @@ button[data-act="copy"][data-state="failed"] { color: var(--danger); }
 .bubble.others .speech { --tint: color-mix(in srgb, var(--text) 7%, var(--surface)); }
 .bubble.others .speech::after { left: auto; right: 22px; }
 .author { font-size: 12px; color: var(--text-2); font-style: italic; }
+
+/* whose voice a shared text plays with */
+.voice-info { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; cursor: help; }
