@@ -80,6 +80,16 @@ create table if not exists public.plays (
   foreign key (preset_id, user_id) references public.presets (id, user_id) on delete set null (preset_id)
 );
 
+-- Default voices per account (used by texts without a preset): one voice per language + speed/pitch.
+create table if not exists public.user_settings (
+  user_id     uuid primary key default auth.uid() references auth.users (id) on delete cascade,
+  voice_th    text check (char_length(voice_th) <= 500),
+  voice_en    text check (char_length(voice_en) <= 500),
+  rate        double precision not null default 1 check (rate between 0.1 and 10),
+  pitch       double precision not null default 1 check (pitch between 0 and 2),
+  updated_at  timestamptz not null default now()
+);
+
 -- Upgrade from v2.0: plays could only reference the player's own texts.
 alter table public.plays drop constraint if exists plays_text_id_user_id_fkey;
 do $$
@@ -123,6 +133,12 @@ create policy "profiles: read" on public.profiles for select to authenticated
 drop policy if exists "profiles: update own" on public.profiles;
 create policy "profiles: update own" on public.profiles for update to authenticated
   using (id = (select auth.uid())) with check (id = (select auth.uid()));
+
+-- default voices: private
+alter table public.user_settings enable row level security;
+drop policy if exists "settings: own" on public.user_settings;
+create policy "settings: own" on public.user_settings for all to authenticated
+  using (user_id = (select auth.uid())) with check (user_id = (select auth.uid()));
 
 -- presets: private
 drop policy if exists "presets: own" on public.presets;
@@ -279,8 +295,8 @@ begin
 end $$;
 
 -- ---------- privileges: signed-in (incl. anonymous) users only ----------
-revoke all on public.profiles, public.presets, public.texts, public.plays from anon, public;
-grant select, insert, update, delete on public.presets, public.texts, public.plays to authenticated;
+revoke all on public.profiles, public.presets, public.texts, public.plays, public.user_settings from anon, public;
+grant select, insert, update, delete on public.presets, public.texts, public.plays, public.user_settings to authenticated;
 grant select on public.profiles to authenticated;
 grant update (display_name) on public.profiles to authenticated;
 

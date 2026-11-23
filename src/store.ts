@@ -1,7 +1,7 @@
 import * as db from "./backend";
-import type { Account, Preset, Scope, TextItem } from "./backend";
+import type { Account, Preset, Scope, TextItem, VoiceDefaults } from "./backend";
 
-export type { Account, Preset, Scope, StatsScope, TextItem } from "./backend";
+export type { Account, Preset, Scope, StatsScope, TextItem, VoiceDefaults } from "./backend";
 
 const SCOPE_KEY = "task-voice:scope";
 function savedScope(): Scope {
@@ -12,6 +12,39 @@ function savedScope(): Scope {
   }
 }
 let account: Account | null = null;
+
+// ---------- default voices (per account) ----------
+const LEGACY_SETTINGS_KEY = "task-voice:settings"; // where older versions kept them, per browser
+const standardDefaults = (): VoiceDefaults => ({ voices: {}, rate: 1, pitch: 1 });
+
+/** Old per-browser defaults, if any (also migrates the oldest single `voiceURI` format). */
+function legacyDefaults(): VoiceDefaults | null {
+  try {
+    const raw = localStorage.getItem(LEGACY_SETTINGS_KEY);
+    if (!raw) return null;
+    const s = JSON.parse(raw);
+    const voices: VoiceDefaults["voices"] = { ...(s.voices ?? {}) };
+    // Oldest format: one voice, language unknown here. main.ts moves it to its real slot once voices load.
+    if (typeof s.voiceURI === "string") voices.en ??= s.voiceURI;
+    return { voices, rate: Number(s.rate) || 1, pitch: Number.isFinite(s.pitch) ? s.pitch : 1 };
+  } catch {
+    return null;
+  }
+}
+
+/** One shared object (main.ts keeps a reference), refilled in place on account changes. */
+const defaults: VoiceDefaults = standardDefaults();
+let defaultsTimer: ReturnType<typeof setTimeout> | null = null;
+let defaultsVersion = 0;
+
+function flushDefaults(): void {
+  if (defaultsTimer) clearTimeout(defaultsTimer);
+  defaultsTimer = null;
+  const userId = account?.userId;
+  if (!userId) return;
+  const snapshot = { voices: { th: defaults.voices.th, en: defaults.voices.en }, rate: defaults.rate, pitch: defaults.pitch };
+  send(() => db.saveDefaults(userId, snapshot));
+}
 /** Which texts the list shows; "everyone" only applies to registered users. */
 let scope: Scope = savedScope();
 
@@ -54,12 +87,31 @@ function send(op: () => Promise<unknown>): void {
   });
 }
 
-/** Re-read the account, texts (for the current scope) and presets. */
+/** Re-read the account, its default voices, texts (for the current scope) and presets. */
 async function reload(): Promise<void> {
   account = await db.getAccount();
-  const s = await db.loadState(store.scope);
+  const [s, saved] = await Promise.all([db.loadState(store.scope), db.getDefaults()]);
   state.texts = s.texts;
   state.presets = s.presets;
+
+  // Account defaults win. A new account starts from this browser's old defaults
+  // (once: they're saved to the account right away), else the standard ones.
+  let next = saved;
+  if (!next) {
+    const legacy = legacyDefaults();
+    if (legacy) {
+      next = legacy;
+      try {
+        localStorage.removeItem(LEGACY_SETTINGS_KEY);
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+  Object.assign(defaults, standardDefaults(), next ?? {});
+  defaults.voices = { ...(next?.voices ?? {}) };
+  defaultsVersion++;
+  if (!saved && next) flushDefaults();
 }
 
 /** Run a reload, reporting (not throwing) connection problems. */
@@ -113,6 +165,24 @@ export const store = {
     notify();
   },
 
+  // ---- default voices (per account) ----
+  /** The account's default voices. Same object for the app's lifetime; refilled on sign in/out. */
+  get defaults(): VoiceDefaults {
+    return defaults;
+  },
+  /** Bumps whenever defaults are replaced by another account's (so the UI can redraw its controls). */
+  get defaultsVersion(): number {
+    return defaultsVersion;
+  },
+  /** Change defaults locally at once; saved to the account shortly after (sliders fire a lot). */
+  updateDefaults(patch: Partial<Omit<VoiceDefaults, "voices">> & { voices?: VoiceDefaults["voices"] }): void {
+    if (patch.voices) defaults.voices = { ...defaults.voices, ...patch.voices };
+    if (patch.rate !== undefined) defaults.rate = patch.rate;
+    if (patch.pitch !== undefined) defaults.pitch = patch.pitch;
+    if (defaultsTimer) clearTimeout(defaultsTimer);
+    defaultsTimer = setTimeout(flushDefaults, 300);
+  },
+
   // ---- account ----
   get account(): Account | null {
     return account;
@@ -154,6 +224,7 @@ export const store = {
 
   /** Resolves once every pending change has been saved. */
   async whenIdle(): Promise<void> {
+    if (defaultsTimer) flushDefaults();
     for (const id of [...presetTimers.keys()]) {
       clearTimeout(presetTimers.get(id));
       presetTimers.delete(id);

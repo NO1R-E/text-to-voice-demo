@@ -24,44 +24,18 @@ import { esc } from "./util";
 import { applyTheme, loadTheme, saveTheme, type Theme } from "./theme";
 import { setupAccount } from "./account";
 
-// ---------- default voice settings (per browser) ----------
+// ---------- default voices (per account, saved in Supabase by the store) ----------
 /** What `say()` needs: a voice plus speed/pitch (a Preset also fits this shape). */
 interface VoiceSettings {
   voiceURI?: string;
   rate: number;
   pitch: number;
 }
-/** Defaults: one voice per supported language, shared speed/pitch. */
-interface Settings {
-  voices: Partial<Record<Lang, string>>;
-  rate: number;
-  pitch: number;
-}
-const SETTINGS_KEY = "task-voice:settings";
-function loadSettings(): Settings {
-  try {
-    const s = JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? "{}");
-    const voices: Settings["voices"] = { ...(s.voices ?? {}) };
-    // Migrate the old single `voiceURI` into the slot for its language.
-    if (typeof s.voiceURI === "string") {
-      const v = getVoices().find((x) => x.voiceURI === s.voiceURI);
-      const lang = v ? voiceLanguage(v) : null;
-      if (lang && !voices[lang]) voices[lang] = s.voiceURI;
-      else if (!v) voices.en ??= s.voiceURI; // voices not loaded yet: best guess
-    }
-    return { voices, rate: Number(s.rate) || 1, pitch: Number.isFinite(s.pitch) ? s.pitch : 1 };
-  } catch {
-    return { voices: {}, rate: 1, pitch: 1 };
-  }
-}
-const settings = loadSettings();
-function saveSettings(): void {
-  try {
-    localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
-  } catch {
-    /* ignore */
-  }
-}
+/**
+ * The account's defaults: one voice per language + shared speed/pitch. This is a live
+ * object owned by the store; it's refilled in place when the account changes.
+ */
+const settings = store.defaults;
 
 /** The language a preset is for = its voice's language (null if not Thai/English). */
 function presetLanguage(p: Preset): Lang | null {
@@ -318,8 +292,7 @@ if (ttsSupported) {
   for (const lang of LANGS) {
     const sel = document.getElementById(`voice-${lang}`) as HTMLSelectElement;
     sel.addEventListener("change", () => {
-      settings.voices[lang] = sel.value;
-      saveSettings();
+      store.updateDefaults({ voices: { [lang]: sel.value } });
       // "Auto … voice (name)" labels changed
       renderNewPreset();
       renderList();
@@ -339,13 +312,38 @@ if (ttsSupported) {
   for (const key of ["rate", "pitch"] as const) {
     const input = document.getElementById(key) as HTMLInputElement;
     input.addEventListener("input", () => {
-      settings[key] = Number(input.value);
+      store.updateDefaults({ [key]: Number(input.value) });
       document.getElementById(`${key}-v`)!.textContent =
         key === "rate" ? fmtRate(settings.rate) : fmtPitch(settings.pitch);
-      saveSettings();
     });
   }
 }
+
+/** Draw the Default voices controls from the account's defaults. */
+function renderDefaultControls(): void {
+  if (!ttsSupported) return;
+  for (const lang of LANGS) {
+    const sel = document.getElementById(`voice-${lang}`) as HTMLSelectElement;
+    const vs = voicesFor(lang);
+    const pick = autoVoice(lang);
+    sel.innerHTML = vs.length
+      ? vs.map((v) => voiceOption(v, v === pick)).join("")
+      : `<option value="">No ${LANG_NAME[lang]} voice installed</option>`;
+    sel.disabled = !vs.length;
+  }
+  for (const key of ["rate", "pitch"] as const) {
+    (document.getElementById(key) as HTMLInputElement).value = String(settings[key]);
+    document.getElementById(`${key}-v`)!.textContent = key === "rate" ? fmtRate(settings.rate) : fmtPitch(settings.pitch);
+  }
+}
+// Signing in/out loads another account's defaults: redraw the controls when that happens.
+let shownDefaultsVersion = -1;
+store.subscribe(() => {
+  if (store.defaultsVersion === shownDefaultsVersion) return;
+  shownDefaultsVersion = store.defaultsVersion;
+  renderDefaultControls();
+  renderNewPreset();
+});
 
 // ---------- presets manager ----------
 
@@ -938,20 +936,14 @@ if (ttsSupported) {
       const v = getVoices().find((x) => x.voiceURI === settings.voices[lang]);
       const actual = v ? voiceLanguage(v) : null;
       if (v && actual && actual !== lang) {
-        settings.voices[actual] ??= v.voiceURI;
-        delete settings.voices[lang];
-        saveSettings();
+        const voices = { ...settings.voices };
+        voices[actual] ??= v.voiceURI;
+        delete voices[lang];
+        settings.voices = voices;
+        store.updateDefaults({}); // save the corrected slots
       }
     }
-    for (const lang of LANGS) {
-      const sel = document.getElementById(`voice-${lang}`) as HTMLSelectElement;
-      const vs = voicesFor(lang);
-      const pick = autoVoice(lang);
-      sel.innerHTML = vs.length
-        ? vs.map((v) => voiceOption(v, v === pick)).join("")
-        : `<option value="">No ${LANG_NAME[lang]} voice installed</option>`;
-      sel.disabled = !vs.length;
-    }
+    renderDefaultControls();
     renderPresets();
     renderNewPreset();
     renderList();

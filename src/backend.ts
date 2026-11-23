@@ -27,6 +27,13 @@ export interface Account {
   displayName?: string;
 }
 
+/** Default voices for texts without a preset, saved per account. */
+export interface VoiceDefaults {
+  voices: { th?: string; en?: string };
+  rate: number;
+  pitch: number;
+}
+
 export type Scope = "mine" | "everyone";
 export type StatsScope = "mine" | "overall";
 
@@ -152,6 +159,37 @@ export async function loadState(scope: Scope = "mine"): Promise<{ texts: TextIte
     })),
   };
 }
+
+type SettingsRow = { voice_th: string | null; voice_en: string | null; rate: number; pitch: number };
+
+/** This account's default voices, or null if it never saved any. */
+export async function getDefaults(): Promise<VoiceDefaults | null> {
+  const rows = await must<SettingsRow[]>(sb().from("user_settings").select("voice_th,voice_en,rate,pitch"));
+  const r = rows?.[0];
+  if (!r) return null;
+  return {
+    voices: { th: r.voice_th ?? undefined, en: r.voice_en ?? undefined },
+    rate: Number(r.rate),
+    pitch: Number(r.pitch),
+  };
+}
+
+export const saveDefaults = (userId: string, d: VoiceDefaults) =>
+  must(
+    sb()
+      .from("user_settings")
+      .upsert(
+        {
+          user_id: userId,
+          voice_th: d.voices.th ?? null,
+          voice_en: d.voices.en ?? null,
+          rate: d.rate,
+          pitch: d.pitch,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "user_id" },
+      ),
+  );
 
 export const getStats = (days: number, tz: string, scope: StatsScope = "mine") =>
   must<Stats>(sb().rpc("get_stats", { p_days: days, p_tz: tz, p_scope: scope }));

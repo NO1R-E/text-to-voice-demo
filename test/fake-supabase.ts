@@ -60,6 +60,7 @@ class Query<T = unknown> implements PromiseLike<Result<T>> {
   private patch: Record<string, unknown> = {};
   private filters: [string, unknown][] = [];
   private orders: [string, boolean][] = [];
+  private conflict: string | null = null;
 
   constructor(
     private table: string,
@@ -73,6 +74,13 @@ class Query<T = unknown> implements PromiseLike<Result<T>> {
   insert(v: Record<string, unknown> | Record<string, unknown>[]) {
     this.kind = "insert";
     this.values = Array.isArray(v) ? v : [v];
+    return this;
+  }
+  /** insert … on conflict (onConflict) do update: like supabase-js upsert(). */
+  upsert(v: Record<string, unknown>, opts: { onConflict?: string } = {}) {
+    this.kind = "insert";
+    this.values = [v];
+    this.conflict = opts.onConflict ?? "id";
     return this;
   }
   update(v: Record<string, unknown>) {
@@ -114,7 +122,13 @@ class Query<T = unknown> implements PromiseLike<Result<T>> {
       case "insert": {
         const cols = Object.keys(this.values[0]);
         const rows = this.values.map((r) => `(${cols.map((c) => p(r[c])).join(", ")})`).join(", ");
-        return [`insert into ${t} (${cols.map(ident).join(", ")}) values ${rows}`, params];
+        const upsert = this.conflict
+          ? ` on conflict (${ident(this.conflict)}) do update set ${cols
+              .filter((c) => c !== this.conflict)
+              .map((c) => `${ident(c)} = excluded.${ident(c)}`)
+              .join(", ")}`
+          : "";
+        return [`insert into ${t} (${cols.map(ident).join(", ")}) values ${rows}${upsert}`, params];
       }
       case "update": {
         const sets = Object.entries(this.patch).map(([c, v]) => `${ident(c)} = ${p(v)}`).join(", ");

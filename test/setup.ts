@@ -48,7 +48,9 @@ if (browser) {
 beforeEach(async () => {
   await storeIdle(); // let the previous test's saves land before wiping
   fakeSupabase.offline = false;
-  await testPool.query("truncate public.plays, public.texts, public.presets, auth.users restart identity cascade");
+  await testPool.query(
+    "truncate public.plays, public.texts, public.presets, public.user_settings, auth.users restart identity cascade",
+  );
   voices.splice(0, voices.length, ...allVoices);
   synth.speak.mockClear();
   synth.cancel.mockClear();

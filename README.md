@@ -117,7 +117,7 @@ Open **Voice settings & presets**:
 - **Default voices**: one for Thai text and one for English text, with shared speed and pitch. **▶ Preview** plays a sample.
 - **Presets**: **+ New preset**, then name it and pick a voice, speed and pitch. Presets are grouped by language. **✎ Edit** opens one; **▶ Test** plays it.
 
-Default voices and the theme are saved per browser (localStorage). Texts, presets and plays are saved in Supabase.
+**Default voices, presets, texts and plays are saved in your account** (Supabase), so they follow you to any device you sign in on. Guests keep theirs in their guest account. Only the theme and list sort are per browser. If a saved voice isn't installed on a device, that language's Auto voice is used instead.
 
 ### Thai & English
 - Any Thai character makes a text **Thai**; everything else is **English**.
@@ -222,6 +222,7 @@ No front-end framework, no server, no paid services.
 | Object | What it is |
 |---|---|
 | `profiles` | id (= user), display_name. Created automatically when a user signs up |
+| `user_settings` | one row per user: default Thai voice, default English voice, rate, pitch |
 | `presets` | id, user_id, name, voice_uri, rate, pitch, created_at |
 | `texts` | id, user_id, text, preset_id, created_at, updated_at |
 | `plays` | one row per time a text is read aloud: user_id (who played), text_id, played_at, chars, voice_uri, preset_id |
