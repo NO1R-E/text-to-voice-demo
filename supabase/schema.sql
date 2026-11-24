@@ -223,10 +223,11 @@ drop function if exists public.clear_plays();
 
 -- Dashboard numbers.
 --   p_days:  7 / 30 / … (0 = all time)     p_tz: IANA time zone for day boundaries
---   p_scope: 'mine'    = your texts, played by anyone
---            'overall' = all registered users' texts (registered callers only)
--- Returns range, totals (plays, chars, listeners, texts), top texts, daily series, Thai/English
--- split, plays per hour of day (0–23), top voices, and authors (overall) or me-vs-others (mine).
+--   p_scope: 'mine'    = your listening: every play YOU made, of any text (yours or others')
+--            'overall' = all registered users' texts, played by anyone (registered callers only)
+-- Returns range, totals (plays, chars, listeners, distinctTexts, texts), top texts (with author and
+-- whether it's yours), daily series, Thai/English split, plays per hour of day (0–23), top voices,
+-- and authors (overall) or whose texts you play (mine).
 drop function if exists public.get_stats(integer, text);
 create or replace function public.get_stats(p_days integer default 30, p_tz text default 'UTC', p_scope text default 'mine')
 returns jsonb
@@ -258,45 +259,50 @@ begin
     raise exception 'Unknown time zone: %', p_tz using errcode = '22023';
   end;
 
-  -- The texts in scope (s) and every play of them (sp), by anyone.
+  -- sp = the plays in scope: yours (mine) or those of registered users' texts (overall).
   if v_all then -- from the first play, shown as 7–60 days
-    with s as (
-      select t.id from public.texts t left join public.profiles pr on pr.id = t.user_id
-      where (not v_overall and t.user_id = v_uid) or (v_overall and pr.id is not null)
-    )
     select greatest(v_today - 59, least(coalesce(min((p.played_at at time zone p_tz)::date), v_today), v_today - 6))
-      into v_start from public.plays p join s on s.id = p.text_id;
+      into v_start
+      from public.plays p
+      join public.texts t on t.id = p.text_id
+      left join public.profiles pr on pr.id = t.user_id
+      where (not v_overall and p.user_id = v_uid) or (v_overall and pr.id is not null);
   else
     v_start := v_today - (p_days - 1);
   end if;
   v_since := v_start::timestamp at time zone p_tz;
 
-  with s as (
-    select t.id, t.text, pr.display_name as author
-    from public.texts t left join public.profiles pr on pr.id = t.user_id
-    where (not v_overall and t.user_id = v_uid) or (v_overall and pr.id is not null)
-  ),
-  sp as ( -- plays of those texts within the range
-    select p.id, p.text_id, p.user_id, p.played_at, p.chars, p.voice_uri, s.text, s.author
-    from public.plays p join s on s.id = p.text_id
-    where v_all or p.played_at >= v_since
+  with sp as (
+    select p.id, p.text_id, p.user_id, p.played_at, p.chars, p.voice_uri,
+           t.text, t.user_id as owner, pr.display_name as author
+    from public.plays p
+    join public.texts t on t.id = p.text_id
+    left join public.profiles pr on pr.id = t.user_id
+    where (v_all or p.played_at >= v_since)
+      and ((not v_overall and p.user_id = v_uid) or (v_overall and pr.id is not null))
   )
   select jsonb_build_object(
     'range', jsonb_build_object('days', p_days, 'start', to_char(v_start, 'YYYY-MM-DD'),
                                 'end', to_char(v_today, 'YYYY-MM-DD'), 'tz', p_tz, 'scope', p_scope),
     'totals', (
-      select jsonb_build_object('plays', count(*)::int, 'chars', coalesce(sum(sp.chars), 0)::int,
-                                'listeners', count(distinct sp.user_id)::int,
-                                'texts', (select count(*)::int from s))
+      select jsonb_build_object(
+        'plays', count(*)::int,
+        'chars', coalesce(sum(sp.chars), 0)::int,
+        'listeners', count(distinct sp.user_id)::int,
+        'distinctTexts', count(distinct sp.text_id)::int,
+        -- texts you own (mine) / all registered users' texts (overall)
+        'texts', case when v_overall
+                      then (select count(*)::int from public.texts t join public.profiles pr on pr.id = t.user_id)
+                      else (select count(*)::int from public.texts t where t.user_id = v_uid) end)
       from sp),
     'top', coalesce((
-      select jsonb_agg(jsonb_build_object('id', x.id, 'text', x.text, 'author', x.author, 'plays', x.plays,
-                                          'chars', x.chars,
+      select jsonb_agg(jsonb_build_object('id', x.id, 'text', x.text, 'author', x.author, 'mine', x.mine,
+                                          'plays', x.plays, 'chars', x.chars,
                                           'lastPlayed', (extract(epoch from x.last_played) * 1000)::bigint)
                        order by x.plays desc, x.last_played desc)
-      from (select sp.text_id as id, sp.text, sp.author, count(*)::int as plays, sum(sp.chars)::int as chars,
-                   max(sp.played_at) as last_played
-            from sp group by sp.text_id, sp.text, sp.author) x), '[]'::jsonb),
+      from (select sp.text_id as id, sp.text, sp.author, (sp.owner = v_uid) as mine,
+                   count(*)::int as plays, sum(sp.chars)::int as chars, max(sp.played_at) as last_played
+            from sp group by sp.text_id, sp.text, sp.author, sp.owner) x), '[]'::jsonb),
     'daily', (
       select jsonb_agg(jsonb_build_object('day', to_char(d.d, 'YYYY-MM-DD'), 'plays', d.n) order by d.d)
       from (select g::date as d, count(sp.id)::int as n
@@ -320,9 +326,9 @@ begin
       select jsonb_agg(jsonb_build_object('author', a.author, 'plays', a.n, 'texts', a.k) order by a.n desc, a.author)
       from (select sp.author, count(*)::int as n, count(distinct sp.text_id)::int as k from sp
             where sp.author is not null group by sp.author order by n desc, sp.author limit 5) a), '[]'::jsonb) end,
-    'listenedBy', case when not v_overall then (
-      select jsonb_build_object('me', count(*) filter (where sp.user_id = v_uid)::int,
-                                'others', count(*) filter (where sp.user_id <> v_uid)::int)
+    'whoseTexts', case when not v_overall then (
+      select jsonb_build_object('own', count(*) filter (where sp.owner = v_uid)::int,
+                                'others', count(*) filter (where sp.owner <> v_uid)::int)
       from sp) end
   ) into v_out;
   return v_out;

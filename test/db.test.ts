@@ -158,7 +158,7 @@ describe("get_stats (dashboard)", () => {
     const pop = await addText(u, "popular");
     for (let i = 0; i < 3; i++) await play(u, pop, 7);
     const s = await stats(u, 7, "Asia/Bangkok");
-    expect(s.totals).toEqual({ plays: 4, chars: 25, texts: 2, listeners: 1 });
+    expect(s.totals).toEqual({ plays: 4, chars: 25, texts: 2, listeners: 1, distinctTexts: 2 });
     expect(s.top.map((t: any) => [t.text, t.plays])).toEqual([
       ["popular", 3],
       ["rare", 1],

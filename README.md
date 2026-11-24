@@ -146,9 +146,9 @@ Open **Voice settings & presets**:
 - Voices in other languages are hidden.
 
 ### Dashboard
-- **Tiles**: times read aloud, listeners (different people), characters spoken, texts, and the most-played text.
-- **Cards**: most played texts (top 10), plays per day, Thai vs English, busiest hours (your time zone), top voices, and either **who listens to your texts** (you vs others, in *Mine*) or **top authors** (in *Overall*). Hover any bar for details; **Table view** lists every text.
-- **Mine**: your texts, played by anyone. **Overall** (registered users): all registered users' texts.
+- **Mine** = **your listening**: every play *you* made, of any text (yours or others'). Tiles: times you played, texts played, characters, your texts, your most played. Last card: **whose texts you play** (your own vs other people's).
+- **Overall** (registered users) = all registered users' texts, **played by anyone**: the best texts overall. Tiles include **listeners**; last card: **top authors**.
+- Both views: most played (top 10), plays per day, Thai vs English, busiest hours (your time zone), top voices. Hover any bar for details; **Table view** lists every text with its author.
 - Play history is permanent: there is no reset, and the database doesn't allow anyone to delete or change plays. (Deleting a text removes that text's plays with it.)
 
 ### Status pill
@@ -195,6 +195,7 @@ Tests don't touch your Supabase project. They run against a **local PostgreSQL**
 - [`test/supabase-shim.sql`](test/supabase-shim.sql) adds the `anon` and `authenticated` roles, `auth.users` and `auth.uid()`;
 - then the real [`supabase/schema.sql`](supabase/schema.sql) is applied;
 - [`test/fake-supabase.ts`](test/fake-supabase.ts) stands in for `@supabase/supabase-js` and runs each request as the signed-in visitor, so RLS, constraints and SQL functions are really exercised.
+- [`test/layout.test.ts`](test/layout.test.ts) opens the rendered dashboard in a **headless Chrome/Edge** with the real CSS and measures the chart bars (skipped if no browser is found; set `CHROME_PATH` to point at one).
 
 Setup: put a local Postgres URL in `.env` as `DATABASE_URL`. The tests create and rebuild a separate database named `<name>_test`, and refuse to run against any database whose name doesn't end in `_test`. The first run also creates the login-less roles `anon` and `authenticated` on that Postgres server.
 
@@ -250,7 +251,7 @@ No front-end framework, no server, no paid services.
 | `texts` | id, user_id, text, preset_id, created_at, updated_at |
 | `plays` | one row per time a text is read aloud: user_id (who played), text_id, played_at, chars, voice_uri, preset_id |
 | `list_texts(p_scope)` | texts for the list: `mine` or `everyone`, with play counts, author, is_mine |
-| `get_stats(p_days, p_tz, p_scope)` | dashboard numbers (`mine` or `overall`): totals, top texts, daily, Thai/English, hours, voices, authors / listeners |
+| `get_stats(p_days, p_tz, p_scope)` | dashboard numbers: `mine` (your plays) or `overall` (registered users' texts): totals, top texts, daily, Thai/English, hours, voices, authors / whose texts |
 | `ping()` | connection check for the status pill |
 
 Composite foreign keys make sure a text can only use its owner's presets. A play can only be recorded for a text the player is allowed to see.

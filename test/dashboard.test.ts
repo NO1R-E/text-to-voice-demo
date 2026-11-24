@@ -55,7 +55,7 @@ describe("dashboard (from the database)", () => {
     expect(document.getElementById("tab-dashboard")!.textContent).not.toMatch(/reset/i);
   });
 
-  it("shows the new cards: listeners, Thai/English, busiest hours, top voices, who listened", async () => {
+  it("shows the cards: texts played, Thai/English, busiest hours, top voices, whose texts", async () => {
     const ui = await boot();
     ui.add("hello");
     ui.add("สวัสดี");
@@ -63,14 +63,14 @@ describe("dashboard (from the database)", () => {
     ui.speak("สวัสดี", 1);
     ui.openDashboard();
     await vi.waitFor(() => expect(ui.$('[data-stat="plays"]').textContent).toBe("3"));
-    expect(ui.$('[data-stat="listeners"]').textContent).toBe("1");
+    expect(ui.$('[data-stat="distinct"]').textContent).toBe("2"); // Mine: different texts you played
     const langs = ui.$('[data-card="languages"]');
     expect(langs.textContent).toMatch(/Thai/);
     expect(langs.textContent).toMatch(/English/);
     expect(langs.querySelectorAll(".seg")).toHaveLength(2);
     expect(ui.$('[data-card="hours"]').querySelectorAll(".hour")).toHaveLength(24);
     expect(ui.$('[data-card="voices"]').querySelectorAll(".hbar-row").length).toBeGreaterThan(0);
-    expect(ui.$('[data-card="listeners"]').textContent).toMatch(/You/);
+    expect(ui.$('[data-card="whose"]').textContent).toMatch(/Your own/);
     expect(document.querySelector('[data-card="authors"]')).toBeNull(); // Overall only
   });
 });

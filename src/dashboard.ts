@@ -6,7 +6,7 @@ import { esc } from "./util";
 const RANGES = { 7: "7 days", 30: "30 days", 0: "All time" } as const;
 type Range = keyof typeof RANGES;
 let range: Range = 30;
-/** "mine" = your texts (played by anyone); "overall" = all registered users' texts. */
+/** "mine" = your listening (every play you made); "overall" = all registered users' texts. */
 let dashScope: StatsScope = "mine";
 let renderToken = 0;
 
@@ -96,12 +96,12 @@ const empty = (msg = "No plays in this range yet.") => `<p class="empty">${msg}<
 function withDefaults(s: Stats): Stats {
   return {
     ...s,
-    totals: { ...s.totals, listeners: s.totals.listeners ?? 0 },
+    totals: { ...s.totals, listeners: s.totals.listeners ?? 0, distinctTexts: s.totals.distinctTexts ?? 0 },
     languages: s.languages ?? { th: 0, en: 0 },
     hours: s.hours?.length === 24 ? s.hours : Array(24).fill(0),
     voices: s.voices ?? [],
     authors: s.authors ?? null,
-    listenedBy: s.listenedBy ?? null,
+    whoseTexts: s.whoseTexts ?? null,
   };
 }
 
@@ -127,7 +127,9 @@ export async function renderDashboard(root: HTMLElement): Promise<void> {
   if (token !== renderToken) return; // a newer render is on its way
 
   const overall = dashScope === "overall";
-  const by = (author?: string | null) => (overall && author ? ` · by ${esc(author)}` : "");
+  // Show the author for overall, and in Mine for texts that aren't yours.
+  const by = (author?: string | null, mine?: boolean) =>
+    author && (overall || mine === false) ? ` · by ${esc(author)}` : "";
   const most = s.top[0];
   const total = s.totals.plays;
   const maxDaily = Math.max(1, ...s.daily.map((d) => d.plays));
@@ -136,26 +138,30 @@ export async function renderDashboard(root: HTMLElement): Promise<void> {
 
   const tiles = `
     <div class="tiles">
-      <div class="tile"><span class="label">Times read aloud</span><span class="value" data-stat="plays">${total.toLocaleString()}</span></div>
-      <div class="tile"><span class="label">Listeners</span><span class="value" data-stat="listeners">${s.totals.listeners.toLocaleString()}</span></div>
+      <div class="tile"><span class="label">${overall ? "Times read aloud" : "Times you played"}</span><span class="value" data-stat="plays">${total.toLocaleString()}</span></div>
+      ${
+        overall
+          ? `<div class="tile"><span class="label">Listeners</span><span class="value" data-stat="listeners">${s.totals.listeners.toLocaleString()}</span></div>`
+          : `<div class="tile"><span class="label">Texts played</span><span class="value" data-stat="distinct">${s.totals.distinctTexts.toLocaleString()}</span></div>`
+      }
       <div class="tile"><span class="label">Characters spoken</span><span class="value" data-stat="chars">${s.totals.chars.toLocaleString()}</span></div>
       <div class="tile"><span class="label">${overall ? "Shared texts" : "Your texts"}</span><span class="value" data-stat="texts">${s.totals.texts.toLocaleString()}</span></div>
       <div class="tile wide"><span class="label">${overall ? "Best text overall" : "Your most played"}</span>
         <span class="value text">${most ? esc(truncate(most.text, 60)) : "—"}</span>
-        ${most ? `<span class="muted">${plural(most.plays, "play")}${by(most.author)}</span>` : ""}
+        ${most ? `<span class="muted">${plural(most.plays, "play")}${by(most.author, most.mine)}</span>` : ""}
       </div>
     </div>`;
 
   const topCard = card(
     "top",
-    overall ? "Best texts overall" : "Most played texts",
-    `${overall ? "All registered users' texts" : "Your texts"}, played by anyone · top ${Math.min(10, s.top.length) || 10}`,
+    overall ? "Best texts overall" : "Your most played",
+    `${overall ? "All registered users' texts, played by anyone" : "Texts you played most (yours or others')"} · top ${Math.min(10, s.top.length) || 10}`,
     s.top.length
       ? hbars(
           s.top.slice(0, 10).map((r) => ({
             label: truncate(r.text, 36),
             value: r.plays,
-            tip: `<b>${esc(truncate(r.text, 80))}</b><br>${plural(r.plays, "play")}${by(r.author)} · last ${fmtDate(r.lastPlayed)}`,
+            tip: `<b>${esc(truncate(r.text, 80))}</b><br>${plural(r.plays, "play")}${by(r.author, r.mine)} · last ${fmtDate(r.lastPlayed)}`,
           })),
         )
       : empty("No plays in this range yet. Press ▶ Speak on a text."),
@@ -164,7 +170,7 @@ export async function renderDashboard(root: HTMLElement): Promise<void> {
 
   const dailyCard = card(
     "daily",
-    "Plays per day",
+    overall ? "Plays per day" : "Your plays per day",
     `${fmtDay(s.range.start)} – ${fmtDay(s.range.end)}`,
     `<div class="cols-wrap">
         <div class="cols" style="--n:${s.daily.length}">
@@ -183,7 +189,7 @@ export async function renderDashboard(root: HTMLElement): Promise<void> {
   const langCard = card(
     "languages",
     "Thai vs English",
-    "Share of plays by the text's language",
+    overall ? "Share of plays by the text's language" : "Share of your plays by the text's language",
     total
       ? split([
           { name: "English", value: s.languages.en, cls: "s1" },
@@ -210,7 +216,7 @@ export async function renderDashboard(root: HTMLElement): Promise<void> {
   const voicesCard = card(
     "voices",
     "Top voices",
-    "Voices used to read these texts",
+    overall ? "Voices used to read these texts" : "Voices you listened with",
     s.voices.length
       ? hbars(
           s.voices.map((v) => ({
@@ -238,13 +244,13 @@ export async function renderDashboard(root: HTMLElement): Promise<void> {
           : empty(),
       )
     : card(
-        "listeners",
-        "Who listens to your texts",
-        "Your own plays vs plays by other people",
-        total && s.listenedBy
+        "whose",
+        "Whose texts you play",
+        "Your own texts vs other people's",
+        total && s.whoseTexts
           ? split([
-              { name: "You", value: s.listenedBy.me, cls: "s1" },
-              { name: "Others", value: s.listenedBy.others, cls: "s2" },
+              { name: "Your own", value: s.whoseTexts.own, cls: "s1" },
+              { name: "Other people's", value: s.whoseTexts.others, cls: "s2" },
             ])
           : empty(),
       );
@@ -254,18 +260,18 @@ export async function renderDashboard(root: HTMLElement): Promise<void> {
       <summary>Table view</summary>
       <div class="table-wrap">
         <table>
-          <thead><tr><th>Text</th>${overall ? "<th>Author</th>" : ""}<th class="num">Plays</th><th class="num">Chars spoken</th><th>Last played</th></tr></thead>
+          <thead><tr><th>Text</th><th>Author</th><th class="num">Plays</th><th class="num">Chars spoken</th><th>Last played</th></tr></thead>
           <tbody>
             ${
               s.top.length
                 ? s.top
                     .map(
-                      (r) => `<tr><td>${esc(truncate(r.text, 80))}</td>${overall ? `<td>${esc(r.author ?? "")}</td>` : ""}
+                      (r) => `<tr><td>${esc(truncate(r.text, 80))}</td><td>${r.mine && !overall ? "You" : esc(r.author ?? "")}</td>
                         <td class="num">${r.plays.toLocaleString()}</td><td class="num">${r.chars.toLocaleString()}</td>
                         <td>${new Date(r.lastPlayed).toLocaleString()}</td></tr>`,
                     )
                     .join("")
-                : `<tr><td colspan="${overall ? 5 : 4}" class="muted">No data</td></tr>`
+                : `<tr><td colspan="5" class="muted">No data</td></tr>`
             }
           </tbody>
         </table>
@@ -276,13 +282,13 @@ export async function renderDashboard(root: HTMLElement): Promise<void> {
     <div class="dash-head">
       <div>
         <h2>Dashboard</h2>
-        <p class="sub">${overall ? "Everyone's shared texts" : "Your texts"} · ${RANGES[range]}</p>
+        <p class="sub">${overall ? "Everyone's shared texts, played by anyone" : "Your listening: every play you made"} · ${RANGES[range]}</p>
       </div>
       <div class="dash-controls">
         ${
           store.registered
             ? `<div class="seg-control" role="group" aria-label="Whose texts">
-                 <button data-dash-scope="mine" aria-pressed="${String(!overall)}" title="Your texts, played by anyone">Mine</button>
+                 <button data-dash-scope="mine" aria-pressed="${String(!overall)}" title="Every play you made, of any text">Mine</button>
                  <button data-dash-scope="overall" aria-pressed="${String(overall)}" title="All registered users' texts">Overall</button>
                </div>`
             : ""

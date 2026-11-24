@@ -186,3 +186,20 @@ describe("dashboard scopes", () => {
     expect(ui.$('[data-stat="plays"]').textContent).toBe("2");
   });
 });
+
+describe("Mine = your listening (dashboard)", () => {
+  it("playing someone else's text today shows up today in your Mine", async () => {
+    await seedUser("Bo", ["Bo's line"]);
+    const ui = await boot();
+    await ui.signUp("Ada", "ada@example.com", "secret123");
+    await ui.signedInAs("Ada");
+    await vi.waitFor(() => expect(ui.texts()).toEqual(["Bo's line"])); // Everyone is the default
+    ui.bubble("Bo's line").querySelector<HTMLButtonElement>('[data-act="speak"]')!.click();
+    ui.$<HTMLButtonElement>('[data-tab="dashboard"]').click();
+    await vi.waitFor(() => expect(ui.$('[data-stat="plays"]').textContent).toBe("1"));
+    const days = [...document.querySelectorAll<HTMLElement>('[data-card="daily"] .col-hit')];
+    expect(days.at(-1)!.dataset.tip).toMatch(/1 play/);
+    expect(ui.$(".tile.wide").textContent).toMatch(/Bo's line/);
+    expect(ui.$(".tile.wide").textContent).toMatch(/by Bo/);
+  });
+});

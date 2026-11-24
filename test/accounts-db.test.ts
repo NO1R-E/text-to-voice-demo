@@ -152,16 +152,32 @@ describe("plays and dashboard scopes", () => {
     expect(row.plays).toBe(3);
   });
 
-  it("Mine stats = your texts, played by anyone", async () => {
+  it("Mine = your listening: every play you made, of any text", async () => {
     const a = await register("Ada");
     const b = await register("Bo");
     const ta = await addText(a, "A text");
     const tb = await addText(b, "B text");
-    await play(b, ta);
-    await play(a, tb); // Ada playing Bo's text is not in Ada's "mine"
+    await play(b, ta); // Bo playing Ada's text is in Bo's Mine, not Ada's
+    await play(a, tb);
+    await play(a, tb);
+    await play(a, ta);
     const s = await stats(a, "mine");
+    expect(s.totals.plays).toBe(3);
+    expect(s.totals.distinctTexts).toBe(2);
+    expect(s.top.map((t: any) => [t.text, t.plays, t.author, t.mine])).toEqual([
+      ["B text", 2, "Bo", false],
+      ["A text", 1, "Ada", true],
+    ]);
+  });
+
+  it("today's plays of someone else's text show today in your Mine (the reported bug)", async () => {
+    const a = await register("Ada");
+    const b = await register("Bo");
+    const tb = await addText(b, "Bo's line");
+    await play(a, tb);
+    const s = await as(a, "select public.get_stats(30, 'Asia/Bangkok', 'mine') as s").then((r) => r[0].s);
+    expect(s.daily.at(-1)).toEqual({ day: s.range.end, plays: 1 });
     expect(s.totals.plays).toBe(1);
-    expect(s.top.map((t: any) => t.text)).toEqual(["A text"]);
   });
 
   it("Overall stats rank registered users' texts across everyone, with authors", async () => {
@@ -179,7 +195,7 @@ describe("plays and dashboard scopes", () => {
       ["B text", 2, "Bo"],
       ["A text", 1, "Ada"],
     ]);
-    expect(s.totals).toEqual({ plays: 3, chars: 9, texts: 2, listeners: 2 });
+    expect(s.totals).toEqual({ plays: 3, chars: 9, texts: 2, listeners: 2, distinctTexts: 2 });
   });
 
   it("anonymous visitors can't ask for overall stats", async () => {
@@ -200,16 +216,20 @@ describe("plays and dashboard scopes", () => {
     expect((await list(a, "mine"))[0].plays).toBe(2);
   });
 
-  it("extra dashboard numbers: listeners, Thai/English, hours, voices, who listened", async () => {
+  it("extra Mine numbers: Thai/English, hours, voices, whose texts you play", async () => {
     const a = await register("Ada");
     const b = await register("Bo");
     const en = await addText(a, "hello");
     const th = await addText(a, "สวัสดี");
-    await as(a, "insert into public.plays (text_id, chars, voice_uri, played_at) values ($1, 5, 'voice-a', '2026-11-20 09:15+00')", [en]);
-    await as(b, "insert into public.plays (text_id, chars, voice_uri, played_at) values ($1, 5, 'voice-a', '2026-11-20 09:45+00')", [en]);
-    await as(b, "insert into public.plays (text_id, chars, voice_uri, played_at) values ($1, 6, 'voice-th', '2026-11-20 21:00+00')", [th]);
+    const bo = await addText(b, "Bo's line");
+    const at = (user: string, text: string, voice: string, when: string) =>
+      as(user, "insert into public.plays (text_id, chars, voice_uri, played_at) values ($1, 5, $2, $3)", [text, voice, when]);
+    await at(a, en, "voice-a", "2026-11-20 09:15+00");
+    await at(a, th, "voice-th", "2026-11-20 21:00+00");
+    await at(a, bo, "voice-a", "2026-11-20 09:45+00");
+    await at(b, en, "voice-b", "2026-11-20 10:00+00"); // Bo's listening: not in Ada's Mine
     const s = await stats(a, "mine", 0);
-    expect(s.totals.listeners).toBe(2);
+    expect(s.totals).toMatchObject({ plays: 3, distinctTexts: 3, texts: 2 }); // texts = texts Ada owns
     expect(s.languages).toEqual({ th: 1, en: 2 });
     expect(s.hours).toHaveLength(24);
     expect(s.hours[9]).toBe(2);
@@ -218,7 +238,7 @@ describe("plays and dashboard scopes", () => {
       { voice: "voice-a", plays: 2 },
       { voice: "voice-th", plays: 1 },
     ]);
-    expect(s.listenedBy).toEqual({ me: 1, others: 2 });
+    expect(s.whoseTexts).toEqual({ own: 2, others: 1 });
     expect(s.authors).toBeNull(); // only in overall
   });
 
@@ -236,6 +256,6 @@ describe("plays and dashboard scopes", () => {
       { author: "Bo", plays: 2, texts: 2 },
       { author: "Ada", plays: 1, texts: 1 },
     ]);
-    expect(s.listenedBy).toBeNull(); // only in mine
+    expect(s.whoseTexts).toBeNull(); // only in mine
   });
 });

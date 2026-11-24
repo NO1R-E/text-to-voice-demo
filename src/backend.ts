@@ -58,8 +58,9 @@ export interface Preset {
 
 export interface Stats {
   range: { days: number; start: string; end: string; tz: string };
-  totals: { plays: number; chars: number; texts: number; listeners: number };
-  top: { id: string; text: string; author?: string | null; plays: number; chars: number; lastPlayed: number }[];
+  /** texts = texts you own (mine) / all registered users' texts (overall). */
+  totals: { plays: number; chars: number; texts: number; listeners: number; distinctTexts: number };
+  top: { id: string; text: string; author?: string | null; mine?: boolean; plays: number; chars: number; lastPlayed: number }[];
   daily: { day: string; plays: number }[];
   /** Plays by the text's language. */
   languages: { th: number; en: number };
@@ -69,8 +70,8 @@ export interface Stats {
   voices: { voice: string; plays: number }[];
   /** Overall only: top authors. */
   authors: { author: string; plays: number; texts: number }[] | null;
-  /** Mine only: plays of your texts by you vs by others. */
-  listenedBy: { me: number; others: number } | null;
+  /** Mine only: how many of your plays were of your own texts vs other people's. */
+  whoseTexts: { own: number; others: number } | null;
 }
 
 const URL_ = import.meta.env.VITE_SUPABASE_URL as string | undefined;
